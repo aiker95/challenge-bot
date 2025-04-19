@@ -1224,11 +1224,10 @@ async def main():
     app.router.add_get("/", handle_root)
     
     # Настраиваем обработчик вебхуков
-    webhook_requests_handler = SimpleRequestHandler(
+    SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
-    )
-    webhook_requests_handler.register(app, path="/webhook")
+    ).register(app, path="/webhook")
     
     # Запускаем приложение
     port = int(os.getenv("PORT", 8000))
