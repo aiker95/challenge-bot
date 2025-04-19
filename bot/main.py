@@ -1190,16 +1190,6 @@ async def handle_root(request):
         content_type="text/plain"
     )
 
-async def handle_webhook(request):
-    logger.info("Webhook endpoint accessed")
-    try:
-        data = await request.json()
-        logger.info(f"Received webhook data: {data}")
-        return web.Response(text="OK")
-    except Exception as e:
-        logger.error(f"Error in webhook handler: {e}")
-        return web.Response(status=500, text="Internal Server Error")
-
 async def main():
     logger.info("Starting application...")
     # Логируем переменные окружения
