@@ -615,8 +615,10 @@ async def cmd_profile(message: types.Message):
 @dp.message(Command("stop"), F.chat.type == ChatType.PRIVATE)
 async def cmd_stop(message: types.Message):
     if not await is_private_chat(message):
+        bot_info = await bot.get_me()
         await message.answer(
-            "Чтобы удалить свой профиль, напишите мне в личные сообщения @Zaruba_resbot"
+            "Чтобы удалить свой профиль, нажмите кнопку ниже:",
+            reply_markup=await get_switch_pm_button(bot_info.username)
         )
         return
     try:
@@ -635,8 +637,8 @@ async def cmd_stop(message: types.Message):
                 return
             
             # Создаем клавиатуру для подтверждения удаления
-            keyboard = InlineKeyboardMarkup(row_width=2)
-            keyboard.add(
+            builder = InlineKeyboardBuilder()
+            builder.add(
                 InlineKeyboardButton(
                     text="✅ Да, удалить",
                     callback_data="confirm_stop"
@@ -646,11 +648,12 @@ async def cmd_stop(message: types.Message):
                     callback_data="cancel_stop"
                 )
             )
+            builder.adjust(2)  # 2 кнопки в ряд
             
             await message.answer(
                 "⚠️ Вы уверены, что хотите удалить свой профиль и все данные?\n"
                 "Это действие нельзя отменить!",
-                reply_markup=keyboard
+                reply_markup=builder.as_markup()
             )
     except Exception as e:
         logger.error(f"Error in cmd_stop: {e}", exc_info=True)
