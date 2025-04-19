@@ -43,6 +43,9 @@ async_session = create_async_session(engine)
 registration_states = {}
 registration_locks = {}
 
+# Добавим состояние для обновления профиля
+update_states = {}
+
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, limit=1):
         self.limit = limit
@@ -398,27 +401,28 @@ async def cmd_update(message: types.Message):
         logger.error(f"Error in cmd_update: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@dp.callback_query(lambda c: c.data.startswith('update_'))
-async def update_field_callback(callback_query: types.CallbackQuery):
+@dp.callback_query(F.data.startswith("update_"))
+async def update_field_callback(callback: CallbackQuery):
     try:
-        user_id = callback_query.from_user.id
-        field = callback_query.data.split('_')[1]
+        user_id = callback.from_user.id
+        field = callback.data.split('_')[1]
         
         if field == "emoji":
             # Создаем клавиатуру с эмодзи
-            keyboard = InlineKeyboardMarkup(row_width=4)
+            builder = InlineKeyboardBuilder()
             emojis = ["🏃", "📚", "💪", "🧘", "🎯", "🌟", "⚡", "🔥"]
             for emoji in emojis:
-                keyboard.add(
+                builder.add(
                     InlineKeyboardButton(
                         text=emoji,
                         callback_data=f"select_update_emoji_{emoji}"
                     )
                 )
+            builder.adjust(4)  # 4 кнопки в ряд
             
-            await callback_query.message.edit_text(
+            await callback.message.edit_text(
                 "Выберите новый эмодзи:",
-                reply_markup=keyboard
+                reply_markup=builder.as_markup()
             )
         else:
             field_name = {
@@ -426,23 +430,26 @@ async def update_field_callback(callback_query: types.CallbackQuery):
                 "goal": "цель"
             }[field]
             
-            await callback_query.message.edit_text(
+            await callback.message.edit_text(
                 f"Введите новое {field_name}:"
             )
-            registration_states[user_id] = {
-                "step": 4,
+            update_states[user_id] = {
                 "field": field,
-                "data": {}
+                "message_id": callback.message.message_id
             }
     except Exception as e:
         logger.error(f"Error in update_field_callback: {e}", exc_info=True)
-        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+        await callback.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+        await callback.answer(
+            text="❌ Произошла ошибка",
+            show_alert=True
+        )
 
-@dp.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 4)
+@dp.message(lambda message: message.from_user.id in update_states)
 async def process_field_update(message: types.Message):
     try:
         user_id = message.from_user.id
-        state = registration_states[user_id]
+        state = update_states[user_id]
         field = state["field"]
         value = message.text.strip()
         
@@ -465,7 +472,7 @@ async def process_field_update(message: types.Message):
                 user.goal = value
             
             await session.commit()
-            del registration_states[user_id]
+            del update_states[user_id]
             
             await message.answer(f"✅ {field.capitalize()} успешно обновлено!")
             await cmd_profile(message)
@@ -473,11 +480,11 @@ async def process_field_update(message: types.Message):
         logger.error(f"Error in process_field_update: {e}", exc_info=True)
         await message.answer("Произошла ошибка при обновлении данных. Пожалуйста, попробуйте позже.")
 
-@dp.callback_query(lambda c: c.data.startswith('select_update_emoji_'))
-async def select_update_emoji_callback(callback_query: types.CallbackQuery):
+@dp.callback_query(F.data.startswith('select_update_emoji_'))
+async def select_update_emoji_callback(callback: CallbackQuery):
     try:
-        user_id = callback_query.from_user.id
-        emoji = callback_query.data.split('_')[3]
+        user_id = callback.from_user.id
+        emoji = callback.data.split('_')[3]
         
         async with async_session() as session:
             user = await session.execute(
@@ -489,11 +496,15 @@ async def select_update_emoji_callback(callback_query: types.CallbackQuery):
             user.emoji = emoji
             await session.commit()
             
-            await callback_query.message.edit_text(f"✅ Эмодзи успешно обновлен на {emoji}!")
-            await cmd_profile(callback_query.message)
+            await callback.message.edit_text(f"✅ Эмодзи успешно обновлен на {emoji}!")
+            await cmd_profile(callback.message)
     except Exception as e:
         logger.error(f"Error in select_update_emoji_callback: {e}", exc_info=True)
-        await callback_query.message.answer("Произошла ошибка при обновлении эмодзи. Пожалуйста, попробуйте позже.")
+        await callback.message.answer("Произошла ошибка при обновлении эмодзи. Пожалуйста, попробуйте позже.")
+        await callback.answer(
+            text="❌ Произошла ошибка",
+            show_alert=True
+        )
 
 # Добавляем фильтр ChatTypeFilter к остальным командам профиля
 @dp.message(Command("profile"), F.chat.type == ChatType.PRIVATE)
@@ -997,23 +1008,8 @@ async def process_complete_callback(callback: CallbackQuery):
         
         # Обработка выбранной даты
         selected_date = datetime.strptime(data, "%Y-%m-%d").date()
-        await process_completion(user_id, selected_date, callback.message)
+        formatted_date = selected_date.strftime("%d.%m.%Y")
         
-        # Простой ответ на callback-запрос
-        await callback.answer(
-            text="✅ Выполнение отмечено!",
-            show_alert=False
-        )
-    except Exception as e:
-        logger.error(f"Error in process_complete_callback: {e}", exc_info=True)
-        await callback.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
-        await callback.answer(
-            text="❌ Произошла ошибка",
-            show_alert=True
-        )
-
-async def process_completion(user_id: int, date: datetime.date, message: types.Message):
-    try:
         async with async_session() as session:
             # Получаем пользователя
             user = await session.execute(
@@ -1023,7 +1019,10 @@ async def process_completion(user_id: int, date: datetime.date, message: types.M
             user = user.scalar_one_or_none()
             
             if not user:
-                await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
+                await callback.answer(
+                    text="❌ Вы не зарегистрированы. Используйте команду /start для регистрации.",
+                    show_alert=True
+                )
                 return
             
             # Проверяем, есть ли уже выполнение на эту дату
@@ -1031,28 +1030,45 @@ async def process_completion(user_id: int, date: datetime.date, message: types.M
                 select(Completion)
                 .where(
                     Completion.user_id == user.id,
-                    Completion.date == date
+                    Completion.date == selected_date
                 )
             )
             existing_completion = existing_completion.scalar_one_or_none()
             
             if existing_completion:
-                await message.answer(f"Вы уже отметили выполнение цели за {date.strftime('%d.%m.%Y')}.")
+                await callback.answer(
+                    text=f"❌ Вы уже отметили выполнение цели за {formatted_date}",
+                    show_alert=True
+                )
                 return
             
             # Создаем новое выполнение
             completion = Completion(
                 user_id=user.id,
-                date=date
+                date=selected_date
             )
             session.add(completion)
             await session.commit()
             
-            await message.answer(f"✅ Вы успешно отметили выполнение цели за {date.strftime('%d.%m.%Y')}!")
+            # Отправляем уведомление
+            await callback.answer(
+                text=f"✅ Вы успешно отметили выполнение цели за {formatted_date}!",
+                show_alert=True
+            )
+            
+            # Обновляем сообщение с кнопками
+            await callback.message.edit_text(
+                f"Выполнение цели за {formatted_date} отмечено! ✅\n\n"
+                f"Хотите отметить выполнение за другую дату?",
+                reply_markup=callback.message.reply_markup
+            )
             
     except Exception as e:
-        logger.error(f"Error in process_completion: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при сохранении выполнения цели.")
+        logger.error(f"Error in process_complete_callback: {e}", exc_info=True)
+        await callback.answer(
+            text="❌ Произошла ошибка при сохранении выполнения цели",
+            show_alert=True
+        )
 
 async def on_startup(bot: Bot) -> None:
     logger.info("Starting bot...")
