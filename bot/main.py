@@ -8,8 +8,11 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 from db.models import Base, User, Completion
+from handlers.commands import cmd_result, cmd_result_all, cmd_result_month, cmd_result_step, cmd_help
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -101,9 +104,59 @@ async def handle_message(message: Message):
             
         except (IndexError, ValueError):
             await message.answer("Пожалуйста, укажите дату в формате ДД.ММ.ГГГГ")
+    elif message.text.startswith("/result"):
+        session = SessionLocal()
+        if " " in message.text:
+            await cmd_result(message, session)
+        else:
+            await cmd_result_all(message, session)
+    elif message.text.startswith("/result_month"):
+        session = SessionLocal()
+        await cmd_result_month(message, session)
+    elif message.text.startswith("/result_step"):
+        session = SessionLocal()
+        await cmd_result_step(message, session)
+    elif message.text == "/help":
+        await cmd_help(message)
+
+async def on_startup(bot: Bot) -> None:
+    # Удаляем вебхук, если он существует
+    await bot.delete_webhook()
+    
+    # Получаем URL сервера из переменных окружения
+    webhook_url = os.getenv("WEBHOOK_URL")
+    if webhook_url:
+        # Устанавливаем вебхук
+        await bot.set_webhook(
+            url=webhook_url,
+            drop_pending_updates=True
+        )
 
 async def main():
-    await dp.start_polling(bot)
+    # Создаем приложение aiohttp
+    app = web.Application()
+    
+    # Настраиваем вебхук
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+    )
+    webhook_requests_handler.register(app, path="/webhook")
+    
+    # Настраиваем приложение
+    setup_application(app, dp, bot=bot)
+    
+    # Запускаем приложение
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    await site.start()
+    
+    # Запускаем бота
+    await on_startup(bot)
+    
+    # Держим приложение запущенным
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main()) 
