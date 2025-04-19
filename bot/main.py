@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import Message, BotCommand, BotCommandScopeDefault
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -504,6 +504,94 @@ async def cmd_info(message: types.Message):
 • Если проблема сохраняется, обратитесь к администратору
 """
     await message.answer(info_text)
+
+@dp.message(Command("complete"))
+async def cmd_complete(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        logger.info(f"Received /complete command from user {user_id}")
+        
+        # Создаем клавиатуру с кнопками выбора даты
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        
+        # Добавляем кнопки только для сегодня и вчера
+        today = datetime.now().date()
+        yesterday = today - timedelta(days=1)
+        
+        keyboard.add(
+            InlineKeyboardButton(
+                text="Сегодня",
+                callback_data=f"complete_{today.strftime('%Y-%m-%d')}"
+            ),
+            InlineKeyboardButton(
+                text="Вчера",
+                callback_data=f"complete_{yesterday.strftime('%Y-%m-%d')}"
+            )
+        )
+        
+        await message.answer(
+            "Выберите дату для отметки выполнения цели:",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Error in cmd_complete: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data.startswith('complete_'))
+async def process_complete_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        data = callback_query.data.split('_')[1]
+        
+        # Обработка выбранной даты
+        selected_date = datetime.strptime(data, "%Y-%m-%d").date()
+        await process_completion(user_id, selected_date, callback_query.message)
+        
+    except Exception as e:
+        logger.error(f"Error in process_complete_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+async def process_completion(user_id: int, date: datetime.date, message: types.Message):
+    try:
+        async with async_session() as session:
+            # Получаем пользователя
+            user = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = user.scalar_one_or_none()
+            
+            if not user:
+                await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
+                return
+            
+            # Проверяем, есть ли уже выполнение на эту дату
+            existing_completion = await session.execute(
+                select(Completion)
+                .where(
+                    Completion.user_id == user.id,
+                    Completion.date == date
+                )
+            )
+            existing_completion = existing_completion.scalar_one_or_none()
+            
+            if existing_completion:
+                await message.answer(f"Вы уже отметили выполнение цели за {date.strftime('%d.%m.%Y')}.")
+                return
+            
+            # Создаем новое выполнение
+            completion = Completion(
+                user_id=user.id,
+                date=date
+            )
+            session.add(completion)
+            await session.commit()
+            
+            await message.answer(f"✅ Вы успешно отметили выполнение цели за {date.strftime('%d.%m.%Y')}!")
+            
+    except Exception as e:
+        logger.error(f"Error in process_completion: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при сохранении выполнения цели.")
 
 async def on_startup(bot: Bot) -> None:
     logger.info("Starting bot...")
