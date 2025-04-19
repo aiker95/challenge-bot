@@ -10,6 +10,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
+from sqlalchemy import text
 
 from db.models import Base, User, Completion, create_async_engine_from_url, create_async_session
 from handlers.commands import cmd_result, cmd_result_all, cmd_result_month, cmd_result_step, cmd_help
@@ -230,7 +231,19 @@ async def main():
     # Применяем миграции
     logger.info("Applying database migrations...")
     async with engine.begin() as conn:
+        # Создаем таблицы, если их нет
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Добавляем колонку created_at, если её нет
+        try:
+            await conn.execute(text("""
+                ALTER TABLE users 
+                ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            """))
+            logger.info("Added created_at column")
+        except Exception as e:
+            logger.error(f"Error adding created_at column: {e}")
+    
     logger.info("Database migrations applied successfully")
     
     # Получаем информацию о боте
