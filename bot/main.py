@@ -48,6 +48,9 @@ class ThrottlingMiddleware(BaseMiddleware):
         super().__init__()
 
     async def __call__(self, handler, event, data):
+        if not isinstance(event, types.Message):
+            return await handler(event, data)
+            
         user_id = event.from_user.id
         current_time = datetime.now().timestamp()
         
@@ -60,7 +63,8 @@ class ThrottlingMiddleware(BaseMiddleware):
 
 class LoggingMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
-        logger.info(f"Handling {event} with data {data}")
+        if isinstance(event, types.Message):
+            logger.info(f"Handling message from user {event.from_user.id}: {event.text}")
         return await handler(event, data)
 
 # Регистрация middleware
