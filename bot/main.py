@@ -35,6 +35,7 @@ async_session = create_async_session(engine)
 
 # Состояния регистрации
 registration_states = {}
+registration_locks = {}
 
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, limit=1):
@@ -76,23 +77,35 @@ async def error_handler(update: types.Update, exception: Exception):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     try:
-        logger.info(f"Received /start command from user {message.from_user.id}")
-        async with async_session() as session:
-            result = await session.execute(
-                User.__table__.select().where(User.telegram_id == message.from_user.id)
-            )
-            user = result.first()
-            
-            if not user:
-                registration_states[message.from_user.id] = {
-                    "step": 1,
-                    "data": {}
-                }
-                logger.info(f"Starting registration for user {message.from_user.id}")
-                await message.answer("Давайте зарегистрируем вас! Как тебя зовут?")
-            else:
-                logger.info(f"User {message.from_user.id} already registered")
-                await message.answer("Вы уже зарегистрированы!")
+        user_id = message.from_user.id
+        logger.info(f"Received /start command from user {user_id}")
+        
+        # Создаем блокировку для пользователя, если её нет
+        if user_id not in registration_locks:
+            registration_locks[user_id] = asyncio.Lock()
+            logger.info(f"Created new lock for user {user_id}")
+        
+        logger.info(f"Acquiring lock for user {user_id}")
+        async with registration_locks[user_id]:
+            logger.info(f"Lock acquired for user {user_id}")
+            async with async_session() as session:
+                result = await session.execute(
+                    User.__table__.select().where(User.telegram_id == user_id)
+                )
+                user = result.first()
+                
+                if not user:
+                    registration_states[user_id] = {
+                        "step": 1,
+                        "data": {},
+                        "lock": asyncio.Lock()
+                    }
+                    logger.info(f"Starting registration for user {user_id}")
+                    await message.answer("Давайте зарегистрируем вас! Как тебя зовут?")
+                else:
+                    logger.info(f"User {user_id} already registered")
+                    await message.answer("Вы уже зарегистрированы!")
+            logger.info(f"Releasing lock for user {user_id}")
     except Exception as e:
         logger.error(f"Error in cmd_start: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -100,39 +113,45 @@ async def cmd_start(message: types.Message):
 @dp.message()
 async def handle_message(message: types.Message):
     try:
-        logger.info(f"Received message from user {message.from_user.id}: {message.text}")
         user_id = message.from_user.id
+        logger.info(f"Received message from user {user_id}: {message.text}")
         
         if user_id in registration_states:
             state = registration_states[user_id]
             logger.info(f"Processing registration step {state['step']} for user {user_id}")
             
-            if state["step"] == 1:
-                state["data"]["name"] = message.text
-                state["step"] = 2
-                logger.info(f"User {user_id} provided name: {message.text}")
-                await message.answer("Какая у тебя цель? (1 строка)")
-            elif state["step"] == 2:
-                state["data"]["goal"] = message.text
-                state["step"] = 3
-                logger.info(f"User {user_id} provided goal: {message.text}")
-                await message.answer("Какой смайлик использовать в отчётах?")
-            elif state["step"] == 3:
-                state["data"]["emoji"] = message.text
-                state["data"]["telegram_id"] = user_id
-                
-                try:
-                    async with async_session() as session:
-                        new_user = User(**state["data"])
-                        session.add(new_user)
-                        await session.commit()
-                        logger.info(f"Successfully registered user {user_id}")
+            # Используем блокировку для этого пользователя
+            logger.info(f"Acquiring registration lock for user {user_id}")
+            async with state["lock"]:
+                logger.info(f"Registration lock acquired for user {user_id}")
+                if state["step"] == 1:
+                    state["data"]["name"] = message.text
+                    state["step"] = 2
+                    logger.info(f"User {user_id} provided name: {message.text}")
+                    await message.answer("Какая у тебя цель? (1 строка)")
+                elif state["step"] == 2:
+                    state["data"]["goal"] = message.text
+                    state["step"] = 3
+                    logger.info(f"User {user_id} provided goal: {message.text}")
+                    await message.answer("Какой смайлик использовать в отчётах?")
+                elif state["step"] == 3:
+                    state["data"]["emoji"] = message.text
+                    state["data"]["telegram_id"] = user_id
                     
-                    del registration_states[user_id]
-                    await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
-                except Exception as e:
-                    logger.error(f"Error saving user {user_id} to database: {e}", exc_info=True)
-                    await message.answer("Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
+                    try:
+                        async with async_session() as session:
+                            new_user = User(**state["data"])
+                            session.add(new_user)
+                            await session.commit()
+                            logger.info(f"Successfully registered user {user_id}")
+                        
+                        del registration_states[user_id]
+                        logger.info(f"Registration completed and state cleared for user {user_id}")
+                        await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
+                    except Exception as e:
+                        logger.error(f"Error saving user {user_id} to database: {e}", exc_info=True)
+                        await message.answer("Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
+                logger.info(f"Releasing registration lock for user {user_id}")
         
         elif message.text.startswith("/complete"):
             try:
