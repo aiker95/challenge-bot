@@ -72,9 +72,16 @@ class LoggingMiddleware(BaseMiddleware):
             logger.info(f"Handling message from user {event.from_user.id}: {event.text}")
         return await handler(event, data)
 
+class CallbackLoggingMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        if isinstance(event, types.CallbackQuery):
+            logger.info(f"Received callback query: {event.data} from user {event.from_user.id}")
+        return await handler(event, data)
+
 # Регистрация middleware
 dp.update.middleware(ThrottlingMiddleware())
 dp.update.middleware(LoggingMiddleware())
+dp.update.middleware(CallbackLoggingMiddleware())
 
 @dp.errors()
 async def error_handler(update: types.Update, exception: Exception):
@@ -1070,6 +1077,7 @@ async def cmd_complete(message: types.Message):
 @dp.callback_query(F.data.startswith("complete_"))
 async def process_complete_callback(callback: CallbackQuery):
     try:
+        logger.info(f"Processing complete callback: {callback.data}")
         user_id = callback.from_user.id
         data = callback.data.split('_')[1]
         
@@ -1086,6 +1094,7 @@ async def process_complete_callback(callback: CallbackQuery):
             user = user.scalar_one_or_none()
             
             if not user:
+                logger.warning(f"User {user_id} not found")
                 await callback.answer(
                     text="❌ Вы не зарегистрированы. Используйте команду /start для регистрации.",
                     show_alert=True
@@ -1103,6 +1112,7 @@ async def process_complete_callback(callback: CallbackQuery):
             existing_completion = existing_completion.scalar_one_or_none()
             
             if existing_completion:
+                logger.info(f"User {user_id} already completed goal for {formatted_date}")
                 await callback.answer(
                     text=f"❌ Вы уже отметили выполнение цели за {formatted_date}",
                     show_alert=True
@@ -1116,6 +1126,8 @@ async def process_complete_callback(callback: CallbackQuery):
             )
             session.add(completion)
             await session.commit()
+            
+            logger.info(f"User {user_id} successfully completed goal for {formatted_date}")
             
             # Отправляем уведомление
             await callback.answer(
