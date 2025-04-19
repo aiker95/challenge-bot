@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import Message, BotCommand, BotCommandScopeDefault, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, ChatTypeFilter
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault, InlineKeyboardMarkup, InlineKeyboardButton, ChatType
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -74,7 +74,11 @@ async def error_handler(update: types.Update, exception: Exception):
         logger.error(f"Telegram API error: {exception}")
     return True
 
-@dp.message(Command("start"))
+# Проверка на личный чат
+async def is_private_chat(message: types.Message) -> bool:
+    return message.chat.type == ChatType.PRIVATE
+
+@dp.message(Command("start"), ChatTypeFilter(chat_type=ChatType.PRIVATE))
 async def cmd_start(message: types.Message):
     try:
         user_id = message.from_user.id
@@ -101,7 +105,21 @@ async def cmd_start(message: types.Message):
                         "lock": asyncio.Lock()
                     }
                     logger.info(f"Starting registration for user {user_id}")
-                    await message.answer("Давайте зарегистрируем вас! Как тебя зовут?")
+                    
+                    # Создаем клавиатуру для начала регистрации
+                    keyboard = InlineKeyboardMarkup(row_width=1)
+                    keyboard.add(
+                        InlineKeyboardButton(
+                            text="Начать регистрацию",
+                            callback_data="start_registration"
+                        )
+                    )
+                    
+                    await message.answer(
+                        "Добро пожаловать! Давайте зарегистрируем вас в системе.\n"
+                        "Нажмите кнопку ниже, чтобы начать:",
+                        reply_markup=keyboard
+                    )
                 else:
                     logger.info(f"User {user_id} already registered")
                     await message.answer("Вы уже зарегистрированы!")
@@ -110,14 +128,219 @@ async def cmd_start(message: types.Message):
         logger.error(f"Error in cmd_start: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@dp.message(Command("stop"))
-async def cmd_stop(message: types.Message):
+@dp.callback_query(lambda c: c.data == "start_registration")
+async def start_registration_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        logger.info(f"Starting registration for user {user_id}")
+        
+        # Создаем клавиатуру для ввода имени
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        keyboard.add(
+            InlineKeyboardButton(
+                text="Ввести имя",
+                callback_data="input_name"
+            )
+        )
+        
+        await callback_query.message.edit_text(
+            "Первый шаг регистрации: введите ваше имя.\n"
+            "Нажмите кнопку ниже, чтобы начать ввод:",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Error in start_registration_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data == "input_name")
+async def input_name_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        registration_states[user_id]["step"] = 1
+        await callback_query.message.edit_text(
+            "Пожалуйста, введите ваше имя:"
+        )
+    except Exception as e:
+        logger.error(f"Error in input_name_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 1)
+async def process_name(message: types.Message):
     try:
         user_id = message.from_user.id
-        logger.info(f"Received /stop command from user {user_id}")
+        name = message.text.strip()
+        
+        if len(name) < 2:
+            await message.answer("Имя должно содержать минимум 2 символа. Попробуйте еще раз:")
+            return
+        
+        registration_states[user_id]["data"]["name"] = name
+        registration_states[user_id]["step"] = 2
+        
+        # Создаем клавиатуру для ввода цели
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        keyboard.add(
+            InlineKeyboardButton(
+                text="Ввести цель",
+                callback_data="input_goal"
+            )
+        )
+        
+        await message.answer(
+            f"Отлично, {name}! Теперь введите вашу цель.\n"
+            "Например: 'Бегать каждый день' или 'Читать 30 минут'\n"
+            "Нажмите кнопку ниже, чтобы начать ввод:",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Error in process_name: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data == "input_goal")
+async def input_goal_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        await callback_query.message.edit_text(
+            "Пожалуйста, введите вашу цель:"
+        )
+    except Exception as e:
+        logger.error(f"Error in input_goal_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 2)
+async def process_goal(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        goal = message.text.strip()
+        
+        if len(goal) < 5:
+            await message.answer("Цель должна содержать минимум 5 символов. Попробуйте еще раз:")
+            return
+        
+        registration_states[user_id]["data"]["goal"] = goal
+        registration_states[user_id]["step"] = 3
+        
+        # Создаем клавиатуру с эмодзи
+        keyboard = InlineKeyboardMarkup(row_width=4)
+        emojis = ["🏃", "📚", "💪", "🧘", "🎯", "🌟", "⚡", "🔥"]
+        for emoji in emojis:
+            keyboard.add(
+                InlineKeyboardButton(
+                    text=emoji,
+                    callback_data=f"select_emoji_{emoji}"
+                )
+            )
+        
+        await message.answer(
+            f"Отлично! Теперь выберите эмодзи, который будет отображаться рядом с вашим именем в статистике.\n"
+            "Нажмите на один из предложенных эмодзи:",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Error in process_goal: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data.startswith('select_emoji_'))
+async def select_emoji_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        emoji = callback_query.data.split('_')[2]
+        
+        registration_states[user_id]["data"]["emoji"] = emoji
+        
+        # Создаем клавиатуру для подтверждения
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(
+            InlineKeyboardButton(
+                text="Подтвердить",
+                callback_data="confirm_registration"
+            ),
+            InlineKeyboardButton(
+                text="Начать заново",
+                callback_data="restart_registration"
+            )
+        )
+        
+        data = registration_states[user_id]["data"]
+        await callback_query.message.edit_text(
+            f"Проверьте введенные данные:\n\n"
+            f"Имя: {data['name']}\n"
+            f"Цель: {data['goal']}\n"
+            f"Эмодзи: {data['emoji']}\n\n"
+            f"Все верно?",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Error in select_emoji_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data == "confirm_registration")
+async def confirm_registration_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        data = registration_states[user_id]["data"]
         
         async with async_session() as session:
-            # Находим пользователя
+            user = User(
+                telegram_id=user_id,
+                name=data["name"],
+                goal=data["goal"],
+                emoji=data["emoji"]
+            )
+            session.add(user)
+            await session.commit()
+            
+            del registration_states[user_id]
+            
+            await callback_query.message.edit_text(
+                f"✅ Регистрация успешно завершена!\n\n"
+                f"Ваши данные:\n"
+                f"Имя: {data['name']}\n"
+                f"Цель: {data['goal']}\n"
+                f"Эмодзи: {data['emoji']}\n\n"
+                f"Теперь вы можете использовать команду /complete для отметки выполнения цели."
+            )
+    except Exception as e:
+        logger.error(f"Error in confirm_registration_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data == "restart_registration")
+async def restart_registration_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        registration_states[user_id] = {
+            "step": 1,
+            "data": {},
+            "lock": asyncio.Lock()
+        }
+        
+        # Создаем клавиатуру для ввода имени
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        keyboard.add(
+            InlineKeyboardButton(
+                text="Ввести имя",
+                callback_data="input_name"
+            )
+        )
+        
+        await callback_query.message.edit_text(
+            "Начнем регистрацию заново.\n"
+            "Пожалуйста, введите ваше имя.\n"
+            "Нажмите кнопку ниже, чтобы начать ввод:",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Error in restart_registration_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+# Обновление профиля
+@dp.message(Command("update"), ChatTypeFilter(chat_type=ChatType.PRIVATE))
+async def cmd_update(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        logger.info(f"Received /update command from user {user_id}")
+        
+        async with async_session() as session:
             user = await session.execute(
                 select(User)
                 .where(User.telegram_id == user_id)
@@ -125,28 +348,133 @@ async def cmd_stop(message: types.Message):
             user = user.scalar_one_or_none()
             
             if not user:
-                await message.answer("Вы не зарегистрированы.")
+                await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
                 return
             
-            # Удаляем все выполнения пользователя
-            await session.execute(
-                Completion.__table__.delete()
-                .where(Completion.user_id == user.id)
+            # Создаем клавиатуру для выбора поля обновления
+            keyboard = InlineKeyboardMarkup(row_width=1)
+            keyboard.add(
+                InlineKeyboardButton(
+                    text="Изменить имя",
+                    callback_data="update_name"
+                ),
+                InlineKeyboardButton(
+                    text="Изменить цель",
+                    callback_data="update_goal"
+                ),
+                InlineKeyboardButton(
+                    text="Изменить эмодзи",
+                    callback_data="update_emoji"
+                )
             )
             
-            # Удаляем пользователя
-            await session.execute(
-                User.__table__.delete()
-                .where(User.id == user.id)
+            await message.answer(
+                "Что вы хотите изменить?",
+                reply_markup=keyboard
             )
+    except Exception as e:
+        logger.error(f"Error in cmd_update: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data.startswith('update_'))
+async def update_field_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        field = callback_query.data.split('_')[1]
+        
+        if field == "emoji":
+            # Создаем клавиатуру с эмодзи
+            keyboard = InlineKeyboardMarkup(row_width=4)
+            emojis = ["🏃", "📚", "💪", "🧘", "🎯", "🌟", "⚡", "🔥"]
+            for emoji in emojis:
+                keyboard.add(
+                    InlineKeyboardButton(
+                        text=emoji,
+                        callback_data=f"select_update_emoji_{emoji}"
+                    )
+                )
+            
+            await callback_query.message.edit_text(
+                "Выберите новый эмодзи:",
+                reply_markup=keyboard
+            )
+        else:
+            field_name = {
+                "name": "имя",
+                "goal": "цель"
+            }[field]
+            
+            await callback_query.message.edit_text(
+                f"Введите новое {field_name}:"
+            )
+            registration_states[user_id] = {
+                "step": 4,
+                "field": field,
+                "data": {}
+            }
+    except Exception as e:
+        logger.error(f"Error in update_field_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 4)
+async def process_field_update(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        state = registration_states[user_id]
+        field = state["field"]
+        value = message.text.strip()
+        
+        if field in ["name", "goal"]:
+            min_length = 2 if field == "name" else 5
+            if len(value) < min_length:
+                await message.answer(f"{'Имя' if field == 'name' else 'Цель'} должна содержать минимум {min_length} символа. Попробуйте еще раз:")
+                return
+        
+        async with async_session() as session:
+            user = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = user.scalar_one_or_none()
+            
+            if field == "name":
+                user.name = value
+            elif field == "goal":
+                user.goal = value
             
             await session.commit()
-            await message.answer("Ваши данные успешно удалены. Спасибо за участие!")
+            del registration_states[user_id]
+            
+            await message.answer(f"✅ {field.capitalize()} успешно обновлено!")
+            await cmd_profile(message)
     except Exception as e:
-        logger.error(f"Error in cmd_stop: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при удалении данных.")
+        logger.error(f"Error in process_field_update: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при обновлении данных. Пожалуйста, попробуйте позже.")
 
-@dp.message(Command("profile"))
+@dp.callback_query(lambda c: c.data.startswith('select_update_emoji_'))
+async def select_update_emoji_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        emoji = callback_query.data.split('_')[3]
+        
+        async with async_session() as session:
+            user = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = user.scalar_one_or_none()
+            
+            user.emoji = emoji
+            await session.commit()
+            
+            await callback_query.message.edit_text(f"✅ Эмодзи успешно обновлен на {emoji}!")
+            await cmd_profile(callback_query.message)
+    except Exception as e:
+        logger.error(f"Error in select_update_emoji_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка при обновлении эмодзи. Пожалуйста, попробуйте позже.")
+
+# Добавляем фильтр ChatTypeFilter к остальным командам профиля
+@dp.message(Command("profile"), ChatTypeFilter(chat_type=ChatType.PRIVATE))
 async def cmd_profile(message: types.Message):
     try:
         user_id = message.from_user.id
@@ -199,14 +527,13 @@ async def cmd_profile(message: types.Message):
         logger.error(f"Error in cmd_profile: {e}", exc_info=True)
         await message.answer("Произошла ошибка при получении профиля.")
 
-@dp.message(Command("update"))
-async def cmd_update(message: types.Message):
+@dp.message(Command("stop"), ChatTypeFilter(chat_type=ChatType.PRIVATE))
+async def cmd_stop(message: types.Message):
     try:
         user_id = message.from_user.id
-        logger.info(f"Received /update command from user {user_id}")
+        logger.info(f"Received /stop command from user {user_id}")
         
         async with async_session() as session:
-            # Получаем пользователя
             user = await session.execute(
                 select(User)
                 .where(User.telegram_id == user_id)
@@ -214,49 +541,114 @@ async def cmd_update(message: types.Message):
             user = user.scalar_one_or_none()
             
             if not user:
-                await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
+                await message.answer("Вы не зарегистрированы.")
                 return
             
-            # Проверяем, есть ли текст после команды
-            if not message.text or len(message.text.split()) < 2:
-                await message.answer(
-                    "Используйте команду в формате:\n"
-                    "/update [имя/цель/эмодзи] [новое значение]\n\n"
-                    "Примеры:\n"
-                    "/update имя Иван\n"
-                    "/update цель Бегать каждый день\n"
-                    "/update эмодзи 🏃"
+            # Создаем клавиатуру для подтверждения удаления
+            keyboard = InlineKeyboardMarkup(row_width=2)
+            keyboard.add(
+                InlineKeyboardButton(
+                    text="✅ Да, удалить",
+                    callback_data="confirm_stop"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="cancel_stop"
                 )
+            )
+            
+            await message.answer(
+                "⚠️ Вы уверены, что хотите удалить свой профиль и все данные?\n"
+                "Это действие нельзя отменить!",
+                reply_markup=keyboard
+            )
+    except Exception as e:
+        logger.error(f"Error in cmd_stop: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data == "confirm_stop")
+async def confirm_stop_callback(callback_query: types.CallbackQuery):
+    try:
+        user_id = callback_query.from_user.id
+        logger.info(f"User {user_id} confirmed profile deletion")
+        
+        async with async_session() as session:
+            user = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = user.scalar_one_or_none()
+            
+            if not user:
+                await callback_query.message.edit_text("Профиль не найден.")
                 return
             
-            # Разбираем команду
-            parts = message.text.split(maxsplit=2)
-            field = parts[1].lower()
-            new_value = parts[2] if len(parts) > 2 else None
+            # Удаляем все выполнения пользователя
+            await session.execute(
+                Completion.__table__.delete()
+                .where(Completion.user_id == user.id)
+            )
             
-            if field not in ["имя", "цель", "эмодзи"]:
-                await message.answer("Неверное поле для обновления. Используйте: имя, цель или эмодзи.")
-                return
-            
-            if not new_value:
-                await message.answer("Укажите новое значение.")
-                return
-            
-            # Обновляем данные
-            if field == "имя":
-                user.name = new_value
-            elif field == "цель":
-                user.goal = new_value
-            elif field == "эмодзи":
-                user.emoji = new_value
+            # Удаляем пользователя
+            await session.execute(
+                User.__table__.delete()
+                .where(User.id == user.id)
+            )
             
             await session.commit()
             
-            # Показываем обновленный профиль
-            await cmd_profile(message)
+            await callback_query.message.edit_text(
+                "✅ Ваши данные успешно удалены.\n"
+                "Спасибо за участие! Если захотите вернуться, используйте команду /start"
+            )
     except Exception as e:
-        logger.error(f"Error in cmd_update: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при обновлении профиля.")
+        logger.error(f"Error in confirm_stop_callback: {e}", exc_info=True)
+        await callback_query.message.edit_text("Произошла ошибка при удалении данных.")
+
+@dp.callback_query(lambda c: c.data == "cancel_stop")
+async def cancel_stop_callback(callback_query: types.CallbackQuery):
+    try:
+        await callback_query.message.edit_text(
+            "❌ Удаление профиля отменено.\n"
+            "Ваши данные сохранены."
+        )
+    except Exception as e:
+        logger.error(f"Error in cancel_stop_callback: {e}", exc_info=True)
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+# Добавляем сообщение для групповых чатов
+@dp.message(Command("start"))
+async def cmd_start_group(message: types.Message):
+    if message.chat.type != ChatType.PRIVATE:
+        await message.answer(
+            "👋 Привет! Я бот для отслеживания целей.\n"
+            "Чтобы начать работу, напишите мне в личные сообщения @Zaruba_resbot"
+        )
+        return
+
+@dp.message(Command("profile"))
+async def cmd_profile_group(message: types.Message):
+    if message.chat.type != ChatType.PRIVATE:
+        await message.answer(
+            "Чтобы просмотреть свой профиль, напишите мне в личные сообщения @Zaruba_resbot"
+        )
+        return
+
+@dp.message(Command("update"))
+async def cmd_update_group(message: types.Message):
+    if message.chat.type != ChatType.PRIVATE:
+        await message.answer(
+            "Чтобы изменить данные профиля, напишите мне в личные сообщения @Zaruba_resbot"
+        )
+        return
+
+@dp.message(Command("stop"))
+async def cmd_stop_group(message: types.Message):
+    if message.chat.type != ChatType.PRIVATE:
+        await message.answer(
+            "Чтобы удалить свой профиль, напишите мне в личные сообщения @Zaruba_resbot"
+        )
+        return
 
 @dp.message(Command("result"))
 async def cmd_result(message: types.Message):
@@ -512,21 +904,19 @@ async def cmd_complete(message: types.Message):
         logger.info(f"Received /complete command from user {user_id}")
         
         # Создаем клавиатуру с кнопками выбора даты
-        keyboard = InlineKeyboardMarkup(row_width=2)
-        
-        # Добавляем кнопки только для сегодня и вчера
-        today = datetime.now().date()
-        yesterday = today - timedelta(days=1)
-        
-        keyboard.add(
-            InlineKeyboardButton(
-                text="Сегодня",
-                callback_data=f"complete_{today.strftime('%Y-%m-%d')}"
-            ),
-            InlineKeyboardButton(
-                text="Вчера",
-                callback_data=f"complete_{yesterday.strftime('%Y-%m-%d')}"
-            )
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Сегодня",
+                        callback_data=f"complete_{datetime.now().date().strftime('%Y-%m-%d')}"
+                    ),
+                    InlineKeyboardButton(
+                        text="Вчера",
+                        callback_data=f"complete_{(datetime.now().date() - timedelta(days=1)).strftime('%Y-%m-%d')}"
+                    )
+                ]
+            ]
         )
         
         await message.answer(
