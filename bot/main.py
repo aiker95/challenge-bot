@@ -132,9 +132,18 @@ async def on_startup(bot: Bot) -> None:
             drop_pending_updates=True
         )
 
+async def handle_root(request):
+    return web.Response(
+        text="Challenge Bot is running! 🚀\n\nThis is a Telegram bot for group challenges and goal tracking.\n\nBot is available at @Zaruba_resbot",
+        content_type="text/plain"
+    )
+
 async def main():
     # Создаем приложение aiohttp
     app = web.Application()
+    
+    # Добавляем обработчик для корневого URL
+    app.router.add_get('/', handle_root)
     
     # Настраиваем вебхук
     webhook_requests_handler = SimpleRequestHandler(
