@@ -1204,11 +1204,15 @@ async def main():
     # Регистрируем корневой endpoint
     app.router.add_get("/", handle_root)
     
-    # Настраиваем webhook app
-    webhook_app = setup_application(app, dp, bot=bot, path="/webhook")
+    # Создаем обработчик вебхука
+    webhook_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        handle_in_background=True
+    )
     
-    # Подключаем как subapp
-    app.add_subapp("/webhook", webhook_app)
+    # Регистрируем обработчик вебхука
+    app.router.add_post("/webhook", webhook_handler)
     
     # Запускаем приложение
     port = int(os.getenv("PORT", 8000))
