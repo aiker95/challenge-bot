@@ -227,6 +227,12 @@ async def main():
     logger.info(f"PORT: {os.getenv('PORT', 8000)}")
     logger.info(f"DB_URL: {os.getenv('DB_URL')}")
     
+    # Применяем миграции
+    logger.info("Applying database migrations...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database migrations applied successfully")
+    
     # Получаем информацию о боте
     try:
         bot_info = await bot.get_me()
