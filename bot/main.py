@@ -13,7 +13,7 @@ from aiohttp import web
 from sqlalchemy import text
 
 from db.models import Base, User, Completion, create_async_engine_from_url, create_async_session
-from handlers.commands import cmd_result, cmd_result_all, cmd_result_month, cmd_result_step, cmd_help, cmd_stop
+from handlers.commands import cmd_result, cmd_result_all, cmd_result_month, cmd_result_step, cmd_help, cmd_stop, cmd_result_day
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -264,6 +264,16 @@ async def handle_message(message: types.Message):
         logger.error(f"Error in handle_message for user {user_id}: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
+@dp.message(Command("result_day"))
+async def cmd_result_day_handler(message: types.Message):
+    try:
+        logger.info(f"Received /result_day command from user {message.from_user.id}")
+        async with async_session() as session:
+            await cmd_result_day(message, session)
+    except Exception as e:
+        logger.error(f"Error in cmd_result_day: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении результатов за вчерашний день.")
+
 async def on_startup(bot: Bot) -> None:
     logger.info("Starting bot...")
     # Удаляем вебхук, если он существует
@@ -274,7 +284,8 @@ async def on_startup(bot: Bot) -> None:
     commands = [
         BotCommand(command="start", description="Начать регистрацию"),
         BotCommand(command="complete", description="Отметить выполнение цели"),
-        BotCommand(command="result", description="Показать результаты"),
+        BotCommand(command="result", description="Показать все результаты"),
+        BotCommand(command="result_day", description="Показать результаты за вчера"),
         BotCommand(command="result_month", description="Показать результаты за месяц"),
         BotCommand(command="result_step", description="Показать результаты по шагам"),
         BotCommand(command="stop", description="Удалить свои данные"),

@@ -10,7 +10,7 @@ from db.models import User, Completion
 logger = logging.getLogger(__name__)
 
 async def cmd_result(message: Message, session: AsyncSession):
-    """Показывает результаты всех пользователей за указанный период"""
+    """Показывает результаты всех пользователей за все время"""
     try:
         # Получаем всех пользователей
         users = await session.execute(select(User))
@@ -19,6 +19,21 @@ async def cmd_result(message: Message, session: AsyncSession):
         if not users:
             await message.answer("Нет зарегистрированных пользователей.")
             return
+        
+        # Получаем первую и последнюю дату выполнения
+        dates = await session.execute(
+            select(Completion.date)
+            .order_by(Completion.date)
+        )
+        dates = dates.scalars().all()
+        
+        if not dates:
+            await message.answer("Пока нет выполненных целей.")
+            return
+        
+        first_date = dates[0]
+        last_date = dates[-1]
+        total_days = (last_date - first_date).days + 1
         
         # Формируем сообщение для каждого пользователя
         result_message = "Результаты всех пользователей:\n\n"
@@ -32,17 +47,51 @@ async def cmd_result(message: Message, session: AsyncSession):
             )
             completions = completions.scalars().all()
             
-            if completions:
-                result_message += f"{user.name} {user.emoji}:\n"
-                for completion in completions:
-                    result_message += f"{completion.date.strftime('%d.%m.%Y')}\n"
-                result_message += "\n"
-            else:
-                result_message += f"{user.name} {user.emoji}: пока нет выполненных целей\n\n"
+            completed_days = len(completions)
+            result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
         
         await message.answer(result_message)
     except Exception as e:
+        logger.error(f"Error in cmd_result: {e}", exc_info=True)
         await message.answer("Произошла ошибка при получении результатов.")
+
+async def cmd_result_day(message: Message, session: AsyncSession):
+    """Показывает результаты всех пользователей за вчерашний день"""
+    try:
+        # Получаем всех пользователей
+        users = await session.execute(select(User))
+        users = users.scalars().all()
+        
+        if not users:
+            await message.answer("Нет зарегистрированных пользователей.")
+            return
+        
+        # Получаем вчерашнюю дату
+        yesterday = datetime.now().date() - timedelta(days=1)
+        
+        # Формируем сообщение
+        result_message = f"Результаты за {yesterday.strftime('%d.%m.%Y')}:\n\n"
+        
+        for user in users:
+            # Проверяем выполнение за вчера
+            completion = await session.execute(
+                select(Completion)
+                .where(
+                    Completion.user_id == user.id,
+                    Completion.date == yesterday
+                )
+            )
+            completion = completion.scalar_one_or_none()
+            
+            if completion:
+                result_message += f"{user.name} {user.emoji}: ✅\n"
+            else:
+                result_message += f"{user.name} {user.emoji}: ❌\n"
+        
+        await message.answer(result_message)
+    except Exception as e:
+        logger.error(f"Error in cmd_result_day: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении результатов за вчерашний день.")
 
 async def cmd_result_all(message: Message, session: AsyncSession):
     """Показывает результаты всех пользователей за все время"""
@@ -180,11 +229,11 @@ async def cmd_help(message: Message):
 Доступные команды:
 /start - Начать регистрацию
 /complete ДД.ММ.ГГГГ - Отметить выполнение цели на указанную дату
-/result ДД.ММ.ГГГГ - Проверить выполнение цели на указанную дату
 /result - Показать все выполненные цели
-/result_month - Показать выполненные цели за текущий месяц
-/result_step N - Показать выполненные цели с шагом N
-/stop - Удалить пользователя и все его записи
-/help - Показать это сообщение
+/result_day - Показать результаты за вчерашний день
+/result_month - Показать результаты за текущий месяц
+/result_step - Показать результаты по шагам
+/stop - Удалить свои данные
+/help - Показать справку
 """
     await message.answer(help_text) 
