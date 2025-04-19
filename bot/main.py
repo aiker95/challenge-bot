@@ -349,8 +349,10 @@ async def restart_registration_callback(callback_query: types.CallbackQuery):
 @dp.message(Command("update"), F.chat.type == ChatType.PRIVATE)
 async def cmd_update(message: types.Message):
     if not await is_private_chat(message):
+        bot_info = await bot.get_me()
         await message.answer(
-            "Чтобы изменить данные профиля, напишите мне в личные сообщения @Zaruba_resbot"
+            "Чтобы изменить данные профиля, нажмите кнопку ниже:",
+            reply_markup=await get_switch_pm_button(bot_info.username)
         )
         return
     try:
@@ -368,9 +370,9 @@ async def cmd_update(message: types.Message):
                 await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
                 return
             
-            # Создаем клавиатуру для выбора поля обновления
-            keyboard = InlineKeyboardMarkup(row_width=1)
-            keyboard.add(
+            # Создаем клавиатуру с помощью InlineKeyboardBuilder
+            builder = InlineKeyboardBuilder()
+            builder.add(
                 InlineKeyboardButton(
                     text="Изменить имя",
                     callback_data="update_name"
@@ -385,9 +387,12 @@ async def cmd_update(message: types.Message):
                 )
             )
             
+            # Настраиваем клавиатуру (1 кнопка в ряд)
+            builder.adjust(1)
+            
             await message.answer(
                 "Что вы хотите изменить?",
-                reply_markup=keyboard
+                reply_markup=builder.as_markup()
             )
     except Exception as e:
         logger.error(f"Error in cmd_update: {e}", exc_info=True)
@@ -973,6 +978,9 @@ async def cmd_complete(message: types.Message):
             )
         )
         
+        # Настраиваем клавиатуру (2 кнопки в ряд)
+        builder.adjust(2)
+        
         await message.answer(
             "Выберите дату для отметки выполнения цели:",
             reply_markup=builder.as_markup()
@@ -991,12 +999,18 @@ async def process_complete_callback(callback: CallbackQuery):
         selected_date = datetime.strptime(data, "%Y-%m-%d").date()
         await process_completion(user_id, selected_date, callback.message)
         
-        # Автоматический ответ на callback-запрос
-        await callback.answer("✅ Выполнение отмечено!")
+        # Простой ответ на callback-запрос
+        await callback.answer(
+            text="✅ Выполнение отмечено!",
+            show_alert=False
+        )
     except Exception as e:
         logger.error(f"Error in process_complete_callback: {e}", exc_info=True)
         await callback.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
-        await callback.answer("❌ Произошла ошибка", show_alert=True)
+        await callback.answer(
+            text="❌ Произошла ошибка",
+            show_alert=True
+        )
 
 async def process_completion(user_id: int, date: datetime.date, message: types.Message):
     try:
