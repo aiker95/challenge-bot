@@ -1200,10 +1200,15 @@ async def main():
     
     # Создаем приложение aiohttp
     app = web.Application()
+    
+    # Регистрируем корневой endpoint
     app.router.add_get("/", handle_root)
     
-    # Настраиваем обработчик вебхуков через setup_application
-    setup_application(app, dp, bot=bot, path="/webhook")
+    # Настраиваем webhook app
+    webhook_app = setup_application(app, dp, bot=bot, path="/webhook")
+    
+    # Подключаем как subapp
+    app.add_subapp("/webhook", webhook_app)
     
     # Запускаем приложение
     port = int(os.getenv("PORT", 8000))
