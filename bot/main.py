@@ -1177,10 +1177,7 @@ async def on_startup(bot: Bot) -> None:
     if webhook_url:
         logger.info(f"Setting webhook to {webhook_url}")
         # Устанавливаем вебхук
-        await bot.set_webhook(
-            url=webhook_url,
-            drop_pending_updates=True
-        )
+        setup_application(app, dp, bot=bot, path="/webhook")
         logger.info("Webhook set successfully")
 
 async def handle_root(request):
@@ -1214,7 +1211,7 @@ async def main():
     app.router.add_get("/", handle_root)
     
     # Настраиваем обработчик вебхуков через setup_application
-    await setup_application(app, dp, bot=bot, path="/webhook")
+    setup_application(app, dp, bot=bot, path="/webhook")
     
     # Запускаем приложение
     port = int(os.getenv("PORT", 8000))
