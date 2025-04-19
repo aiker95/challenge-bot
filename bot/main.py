@@ -219,9 +219,6 @@ async def main():
     # Добавляем обработчик для корневого URL
     app.router.add_get('/', handle_root)
     
-    # Добавляем обработчик для вебхука
-    app.router.add_post('/webhook', handle_webhook)
-    
     # Настраиваем вебхук
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
