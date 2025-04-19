@@ -136,20 +136,26 @@ async def handle_message(message: types.Message):
                 logger.info(f"Registration lock acquired for user {user_id}")
                 try:
                     if state["step"] == 1:
+                        logger.info(f"Processing step 1 for user {user_id}")
                         state["data"]["name"] = message.text
                         state["step"] = 2
                         logger.info(f"User {user_id} provided name: {message.text}")
                         await message.answer("Какая у тебя цель? (1 строка)")
+                        logger.info(f"Sent goal question to user {user_id}")
                     elif state["step"] == 2:
+                        logger.info(f"Processing step 2 for user {user_id}")
                         state["data"]["goal"] = message.text
                         state["step"] = 3
                         logger.info(f"User {user_id} provided goal: {message.text}")
                         await message.answer("Какой смайлик использовать в отчётах?")
+                        logger.info(f"Sent emoji question to user {user_id}")
                     elif state["step"] == 3:
+                        logger.info(f"Processing step 3 for user {user_id}")
                         state["data"]["emoji"] = message.text
                         state["data"]["telegram_id"] = user_id
                         
                         try:
+                            logger.info(f"Saving user {user_id} to database")
                             async with async_session() as session:
                                 new_user = User(**state["data"])
                                 session.add(new_user)
@@ -159,6 +165,7 @@ async def handle_message(message: types.Message):
                             del registration_states[user_id]
                             logger.info(f"Registration completed and state cleared for user {user_id}")
                             await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
+                            logger.info(f"Sent completion message to user {user_id}")
                         except Exception as e:
                             logger.error(f"Error saving user {user_id} to database: {e}", exc_info=True)
                             await message.answer("Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
@@ -167,89 +174,91 @@ async def handle_message(message: types.Message):
                     await message.answer("Произошла ошибка при обработке данных. Пожалуйста, попробуйте позже.")
                 finally:
                     logger.info(f"Releasing registration lock for user {user_id}")
-        
-        elif message.text.startswith("/complete"):
-            try:
-                date_str = message.text.split()[1]
-                date = datetime.strptime(date_str, "%d.%m.%Y").date()
-                logger.info(f"Processing completion for user {user_id} on date {date}")
-                
-                async with async_session() as session:
-                    result = await session.execute(
-                        User.__table__.select().where(User.telegram_id == user_id)
-                    )
-                    user = result.first()
+        else:
+            logger.info(f"User {user_id} is not in registration process")
+            
+            if message.text.startswith("/complete"):
+                try:
+                    date_str = message.text.split()[1]
+                    date = datetime.strptime(date_str, "%d.%m.%Y").date()
+                    logger.info(f"Processing completion for user {user_id} on date {date}")
                     
-                    if not user:
-                        logger.warning(f"User {user_id} not found in database")
-                        await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
-                        return
-                    
-                    result = await session.execute(
-                        Completion.__table__.select().where(
-                            Completion.user_id == user.id,
-                            Completion.date == date
+                    async with async_session() as session:
+                        result = await session.execute(
+                            User.__table__.select().where(User.telegram_id == user_id)
                         )
-                    )
-                    existing_completion = result.first()
+                        user = result.first()
+                        
+                        if not user:
+                            logger.warning(f"User {user_id} not found in database")
+                            await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
+                            return
+                        
+                        result = await session.execute(
+                            Completion.__table__.select().where(
+                                Completion.user_id == user.id,
+                                Completion.date == date
+                            )
+                        )
+                        existing_completion = result.first()
+                        
+                        if existing_completion:
+                            logger.info(f"User {user_id} already completed on {date}")
+                            await message.answer("Вы уже отметили выполнение на эту дату!")
+                            return
+                        
+                        new_completion = Completion(user_id=user.id, date=date)
+                        session.add(new_completion)
+                        await session.commit()
+                        logger.info(f"Successfully added completion for user {user_id} on {date}")
+                        
+                        await message.answer(f"Отлично! Выполнение на {date_str} зарегистрировано!")
                     
-                    if existing_completion:
-                        logger.info(f"User {user_id} already completed on {date}")
-                        await message.answer("Вы уже отметили выполнение на эту дату!")
-                        return
-                    
-                    new_completion = Completion(user_id=user.id, date=date)
-                    session.add(new_completion)
-                    await session.commit()
-                    logger.info(f"Successfully added completion for user {user_id} on {date}")
-                    
-                    await message.answer(f"Отлично! Выполнение на {date_str} зарегистрировано!")
-                
-            except (IndexError, ValueError) as e:
-                logger.error(f"Invalid date format from user {user_id}: {message.text}", exc_info=True)
-                await message.answer("Пожалуйста, укажите дату в формате ДД.ММ.ГГГГ")
-            except Exception as e:
-                logger.error(f"Error in complete command for user {user_id}: {e}", exc_info=True)
-                await message.answer("Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
-        
-        elif message.text.startswith("/result"):
-            try:
-                async with async_session() as session:
-                    if " " in message.text:
-                        logger.info(f"Processing detailed result for user {user_id}")
-                        await cmd_result(message, session)
-                    else:
-                        logger.info(f"Processing all results for user {user_id}")
-                        await cmd_result_all(message, session)
-            except Exception as e:
-                logger.error(f"Error in result command for user {user_id}: {e}", exc_info=True)
-                await message.answer("Произошла ошибка при получении результатов. Пожалуйста, попробуйте позже.")
-        
-        elif message.text.startswith("/result_month"):
-            try:
-                async with async_session() as session:
-                    logger.info(f"Processing monthly result for user {user_id}")
-                    await cmd_result_month(message, session)
-            except Exception as e:
-                logger.error(f"Error in result_month command for user {user_id}: {e}", exc_info=True)
-                await message.answer("Произошла ошибка при получении месячных результатов. Пожалуйста, попробуйте позже.")
-        
-        elif message.text.startswith("/result_step"):
-            try:
-                async with async_session() as session:
-                    logger.info(f"Processing step result for user {user_id}")
-                    await cmd_result_step(message, session)
-            except Exception as e:
-                logger.error(f"Error in result_step command for user {user_id}: {e}", exc_info=True)
-                await message.answer("Произошла ошибка при получении результатов по шагам. Пожалуйста, попробуйте позже.")
-        
-        elif message.text == "/help":
-            try:
-                logger.info(f"Processing help command for user {user_id}")
-                await cmd_help(message)
-            except Exception as e:
-                logger.error(f"Error in help command for user {user_id}: {e}", exc_info=True)
-                await message.answer("Произошла ошибка при отображении справки. Пожалуйста, попробуйте позже.")
+                except (IndexError, ValueError) as e:
+                    logger.error(f"Invalid date format from user {user_id}: {message.text}", exc_info=True)
+                    await message.answer("Пожалуйста, укажите дату в формате ДД.ММ.ГГГГ")
+                except Exception as e:
+                    logger.error(f"Error in complete command for user {user_id}: {e}", exc_info=True)
+                    await message.answer("Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
+            
+            elif message.text.startswith("/result"):
+                try:
+                    async with async_session() as session:
+                        if " " in message.text:
+                            logger.info(f"Processing detailed result for user {user_id}")
+                            await cmd_result(message, session)
+                        else:
+                            logger.info(f"Processing all results for user {user_id}")
+                            await cmd_result_all(message, session)
+                except Exception as e:
+                    logger.error(f"Error in result command for user {user_id}: {e}", exc_info=True)
+                    await message.answer("Произошла ошибка при получении результатов. Пожалуйста, попробуйте позже.")
+            
+            elif message.text.startswith("/result_month"):
+                try:
+                    async with async_session() as session:
+                        logger.info(f"Processing monthly result for user {user_id}")
+                        await cmd_result_month(message, session)
+                except Exception as e:
+                    logger.error(f"Error in result_month command for user {user_id}: {e}", exc_info=True)
+                    await message.answer("Произошла ошибка при получении месячных результатов. Пожалуйста, попробуйте позже.")
+            
+            elif message.text.startswith("/result_step"):
+                try:
+                    async with async_session() as session:
+                        logger.info(f"Processing step result for user {user_id}")
+                        await cmd_result_step(message, session)
+                except Exception as e:
+                    logger.error(f"Error in result_step command for user {user_id}: {e}", exc_info=True)
+                    await message.answer("Произошла ошибка при получении результатов по шагам. Пожалуйста, попробуйте позже.")
+            
+            elif message.text == "/help":
+                try:
+                    logger.info(f"Processing help command for user {user_id}")
+                    await cmd_help(message)
+                except Exception as e:
+                    logger.error(f"Error in help command for user {user_id}: {e}", exc_info=True)
+                    await message.answer("Произошла ошибка при отображении справки. Пожалуйста, попробуйте позже.")
             
     except Exception as e:
         logger.error(f"Error in handle_message for user {user_id}: {e}", exc_info=True)
