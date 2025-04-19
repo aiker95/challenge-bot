@@ -31,7 +31,8 @@ bot = Bot(token=os.getenv("TOKEN"))
 dp = Dispatcher()
 
 # Настройка базы данных
-engine = create_engine(os.getenv("DB_URL"))
+db_url = os.getenv("DB_URL").replace("postgresql://", "postgresql+psycopg2://")
+engine = create_engine(db_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Создание таблиц
