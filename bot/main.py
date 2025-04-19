@@ -33,7 +33,13 @@ bot = Bot(token=os.getenv("TOKEN"))
 dp = Dispatcher()
 
 # Добавляем middleware для автоматического ответа на callback-запросы
-dp.callback_query.middleware(CallbackAnswerMiddleware())
+dp.callback_query.middleware(
+    CallbackAnswerMiddleware(
+        pre=True,  # Отвечаем до выполнения хэндлера
+        text="⏳ Обработка...",  # Текст по умолчанию
+        show_alert=False
+    )
+)
 
 # Настройка базы данных
 engine = create_async_engine_from_url(os.getenv("DB_URL"))
@@ -76,6 +82,14 @@ class CallbackLoggingMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, types.CallbackQuery):
             logger.info(f"Received callback query: {event.data} from user {event.from_user.id}")
+            logger.debug(f"Callback details: {event}")
+            # Добавляем информацию о времени обработки
+            start_time = datetime.now()
+            result = await handler(event, data)
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            logger.info(f"Callback processed in {duration:.2f} seconds")
+            return result
         return await handler(event, data)
 
 # Регистрация middleware
@@ -1075,7 +1089,7 @@ async def cmd_complete(message: types.Message):
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.callback_query(F.data.startswith("complete_"))
-async def process_complete_callback(callback: CallbackQuery):
+async def process_complete_callback(callback: CallbackQuery, callback_answer: CallbackAnswer):
     try:
         logger.info(f"Processing complete callback: {callback.data}")
         user_id = callback.from_user.id
@@ -1084,6 +1098,10 @@ async def process_complete_callback(callback: CallbackQuery):
         # Обработка выбранной даты
         selected_date = datetime.strptime(data, "%Y-%m-%d").date()
         formatted_date = selected_date.strftime("%d.%m.%Y")
+        
+        # Устанавливаем начальное уведомление
+        callback_answer.text = "⏳ Проверяем данные..."
+        callback_answer.show_alert = False
         
         async with async_session() as session:
             # Получаем пользователя
@@ -1095,10 +1113,8 @@ async def process_complete_callback(callback: CallbackQuery):
             
             if not user:
                 logger.warning(f"User {user_id} not found")
-                await callback.answer(
-                    text="❌ Вы не зарегистрированы. Используйте команду /start для регистрации.",
-                    show_alert=True
-                )
+                callback_answer.text = "❌ Вы не зарегистрированы. Используйте команду /start для регистрации."
+                callback_answer.show_alert = True
                 return
             
             # Проверяем, есть ли уже выполнение на эту дату
@@ -1113,10 +1129,8 @@ async def process_complete_callback(callback: CallbackQuery):
             
             if existing_completion:
                 logger.info(f"User {user_id} already completed goal for {formatted_date}")
-                await callback.answer(
-                    text=f"❌ Вы уже отметили выполнение цели за {formatted_date}",
-                    show_alert=True
-                )
+                callback_answer.text = f"❌ Вы уже отметили выполнение цели за {formatted_date}"
+                callback_answer.show_alert = True
                 return
             
             # Создаем новое выполнение
@@ -1129,25 +1143,37 @@ async def process_complete_callback(callback: CallbackQuery):
             
             logger.info(f"User {user_id} successfully completed goal for {formatted_date}")
             
-            # Отправляем уведомление
-            await callback.answer(
-                text=f"✅ Вы успешно отметили выполнение цели за {formatted_date}!",
-                show_alert=True
-            )
+            # Устанавливаем текст ответа
+            callback_answer.text = f"✅ Вы успешно отметили выполнение цели за {formatted_date}!"
+            callback_answer.show_alert = True
             
             # Обновляем сообщение с кнопками
+            builder = InlineKeyboardBuilder()
+            today = datetime.now().date()
+            yesterday = today - timedelta(days=1)
+            
+            builder.add(
+                InlineKeyboardButton(
+                    text="Сегодня",
+                    callback_data=f"complete_{today.strftime('%Y-%m-%d')}"
+                ),
+                InlineKeyboardButton(
+                    text="Вчера",
+                    callback_data=f"complete_{yesterday.strftime('%Y-%m-%d')}"
+                )
+            )
+            builder.adjust(2)
+            
             await callback.message.edit_text(
                 f"Выполнение цели за {formatted_date} отмечено! ✅\n\n"
                 f"Хотите отметить выполнение за другую дату?",
-                reply_markup=callback.message.reply_markup
+                reply_markup=builder.as_markup()
             )
             
     except Exception as e:
         logger.error(f"Error in process_complete_callback: {e}", exc_info=True)
-        await callback.answer(
-            text="❌ Произошла ошибка при сохранении выполнения цели",
-            show_alert=True
-        )
+        callback_answer.text = "❌ Произошла ошибка при сохранении выполнения цели"
+        callback_answer.show_alert = True
 
 async def on_startup(bot: Bot) -> None:
     logger.info("Starting bot...")
