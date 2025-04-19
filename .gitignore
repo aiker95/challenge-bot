@@ -4,7 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -16,6 +15,7 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -23,6 +23,7 @@ var/
 # Virtual Environment
 venv/
 ENV/
+env/
 
 # IDE
 .idea/
@@ -33,9 +34,17 @@ ENV/
 # Environment variables
 .env
 
+# Logs
+*.log
+logs/
+
 # Database
 *.db
 *.sqlite3
 
-# Logs
-*.log 
+# Alembic
+alembic/versions/*
+
+# OS
+.DS_Store
+Thumbs.db 

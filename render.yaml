@@ -8,4 +8,10 @@ services:
       - key: TOKEN
         sync: false
       - key: DB_URL
-        sync: false 
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: PORT
+        value: 8000
+    healthCheckPath: /
+    autoDeploy: true 
