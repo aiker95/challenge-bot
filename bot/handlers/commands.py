@@ -2,16 +2,19 @@ import logging
 from datetime import datetime, timedelta
 from aiogram import types
 from aiogram.filters import Command
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from aiogram.types import Message
 from db.models import User, Completion
 
 logger = logging.getLogger(__name__)
 
-async def cmd_result(message: Message, session: Session):
+async def cmd_result(message: Message, session: AsyncSession):
     try:
         user_id = message.from_user.id
-        user = session.query(User).filter(User.telegram_id == user_id).first()
+        stmt = select(User).where(User.telegram_id == user_id)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
         
         if not user:
             await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
@@ -20,10 +23,12 @@ async def cmd_result(message: Message, session: Session):
         date_str = message.text.split()[1]
         date = datetime.strptime(date_str, "%d.%m.%Y").date()
         
-        completion = session.query(Completion).filter(
+        stmt = select(Completion).where(
             Completion.user_id == user.id,
             Completion.date == date
-        ).first()
+        )
+        result = await session.execute(stmt)
+        completion = result.scalar_one_or_none()
         
         if completion:
             await message.answer(f"Вы выполнили цель {date_str}! {user.emoji}")
@@ -36,16 +41,20 @@ async def cmd_result(message: Message, session: Session):
         logger.error(f"Error in cmd_result: {e}")
         await message.answer("Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
 
-async def cmd_result_all(message: Message, session: Session):
+async def cmd_result_all(message: Message, session: AsyncSession):
     try:
         user_id = message.from_user.id
-        user = session.query(User).filter(User.telegram_id == user_id).first()
+        stmt = select(User).where(User.telegram_id == user_id)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
         
         if not user:
             await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
             return
         
-        completions = session.query(Completion).filter(Completion.user_id == user.id).all()
+        stmt = select(Completion).where(Completion.user_id == user.id)
+        result = await session.execute(stmt)
+        completions = result.scalars().all()
         
         if not completions:
             await message.answer("У вас пока нет выполненных целей")
@@ -61,10 +70,12 @@ async def cmd_result_all(message: Message, session: Session):
         logger.error(f"Error in cmd_result_all: {e}")
         await message.answer("Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
 
-async def cmd_result_month(message: Message, session: Session):
+async def cmd_result_month(message: Message, session: AsyncSession):
     try:
         user_id = message.from_user.id
-        user = session.query(User).filter(User.telegram_id == user_id).first()
+        stmt = select(User).where(User.telegram_id == user_id)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
         
         if not user:
             await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
@@ -73,11 +84,13 @@ async def cmd_result_month(message: Message, session: Session):
         today = datetime.now().date()
         first_day = today.replace(day=1)
         
-        completions = session.query(Completion).filter(
+        stmt = select(Completion).where(
             Completion.user_id == user.id,
             Completion.date >= first_day,
             Completion.date <= today
-        ).all()
+        )
+        result = await session.execute(stmt)
+        completions = result.scalars().all()
         
         if not completions:
             await message.answer("В этом месяце у вас пока нет выполненных целей")
@@ -93,17 +106,21 @@ async def cmd_result_month(message: Message, session: Session):
         logger.error(f"Error in cmd_result_month: {e}")
         await message.answer("Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
 
-async def cmd_result_step(message: Message, session: Session):
+async def cmd_result_step(message: Message, session: AsyncSession):
     try:
         user_id = message.from_user.id
-        user = session.query(User).filter(User.telegram_id == user_id).first()
+        stmt = select(User).where(User.telegram_id == user_id)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
         
         if not user:
             await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
             return
         
         step = int(message.text.split()[1])
-        completions = session.query(Completion).filter(Completion.user_id == user.id).all()
+        stmt = select(Completion).where(Completion.user_id == user.id)
+        result = await session.execute(stmt)
+        completions = result.scalars().all()
         
         if not completions:
             await message.answer("У вас пока нет выполненных целей")

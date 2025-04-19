@@ -228,64 +228,33 @@ async def main():
     logger.info(f"PORT: {os.getenv('PORT', 8000)}")
     logger.info(f"DB_URL: {os.getenv('DB_URL')}")
     
-    # Применяем миграции
-    logger.info("Applying database migrations...")
-    async with engine.begin() as conn:
-        # Создаем таблицы, если их нет
-        await conn.run_sync(Base.metadata.create_all)
-        
-        # Добавляем колонку created_at, если её нет
-        try:
-            await conn.execute(text("""
-                ALTER TABLE users 
-                ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            """))
-            logger.info("Added created_at column")
-        except Exception as e:
-            logger.error(f"Error adding created_at column: {e}")
-    
-    logger.info("Database migrations applied successfully")
-    
     # Получаем информацию о боте
     try:
         bot_info = await bot.get_me()
-        logger.info("Bot information:")
+        logger.info(f"Bot information:")
         logger.info(f"Bot ID: {bot_info.id}")
         logger.info(f"Bot username: @{bot_info.username}")
         logger.info(f"Bot name: {bot_info.first_name}")
-        if bot_info.last_name:
-            logger.info(f"Bot last name: {bot_info.last_name}")
     except Exception as e:
-        logger.error(f"Failed to get bot info: {e}")
+        logger.error(f"Error getting bot info: {e}")
     
     # Создаем приложение aiohttp
     app = web.Application()
+    app.router.add_get("/", handle_root)
+    app.router.add_post("/webhook", handle_webhook)
     
-    # Добавляем обработчик для корневого URL
-    app.router.add_get('/', handle_root)
-    
-    # Настраиваем вебхук
+    # Настраиваем обработчик вебхуков
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
     )
     webhook_requests_handler.register(app, path="/webhook")
     
-    # Настраиваем приложение
-    setup_application(app, dp, bot=bot)
-    
     # Запускаем приложение
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
-    await site.start()
-    logger.info(f"Application started on port {os.getenv('PORT', 8000)}")
-    
-    # Запускаем бота
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"Application started on port {port}")
     await on_startup(bot)
-    
-    # Держим приложение запущенным
-    await asyncio.Event().wait()
+    await web._run_app(app, port=port)
 
 if __name__ == "__main__":
     asyncio.run(main()) 
