@@ -75,7 +75,7 @@ async def error_handler(update: types.Update, exception: Exception):
     return True
 
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
+async def cmd_start(message: types.Message):
     try:
         logger.info(f"Received /start command from user {message.from_user.id}")
         session = SessionLocal()
@@ -94,7 +94,7 @@ async def cmd_start(message: Message):
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.message()
-async def handle_message(message: Message):
+async def handle_message(message: types.Message):
     try:
         logger.info(f"Received message from user {message.from_user.id}: {message.text}")
         user_id = message.from_user.id
