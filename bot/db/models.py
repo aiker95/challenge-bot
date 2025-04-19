@@ -30,7 +30,9 @@ class Completion(Base):
 
 # Создание асинхронного движка
 def create_async_engine_from_url(url: str):
-    return create_async_engine(url, echo=True)
+    # Преобразуем URL для асинхронного подключения
+    async_url = url.replace('postgresql://', 'postgresql+asyncpg://')
+    return create_async_engine(async_url, echo=True)
 
 # Создание асинхронной сессии
 def create_async_session(engine):
