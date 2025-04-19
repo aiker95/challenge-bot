@@ -213,6 +213,13 @@ async def handle_webhook(request):
 
 async def main():
     logger.info("Starting application...")
+    # Логируем переменные окружения
+    logger.info("Environment variables:")
+    logger.info(f"TOKEN: {'*' * len(os.getenv('TOKEN', ''))}")
+    logger.info(f"WEBHOOK_URL: {os.getenv('WEBHOOK_URL')}")
+    logger.info(f"PORT: {os.getenv('PORT', 8000)}")
+    logger.info(f"DB_URL: {os.getenv('DB_URL')}")
+    
     # Создаем приложение aiohttp
     app = web.Application()
     
