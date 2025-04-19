@@ -6,7 +6,7 @@ import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram.dispatcher.middlewares import BaseMiddleware
+from aiogram.middleware import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
