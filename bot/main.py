@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 import os
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.filters.chat_type import ChatTypeFilter
 from aiogram.types import Message, BotCommand, BotCommandScopeDefault, InlineKeyboardMarkup, InlineKeyboardButton, ChatType, CallbackQuery
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
@@ -643,37 +642,56 @@ async def cancel_stop_callback(callback_query: types.CallbackQuery):
         logger.error(f"Error in cancel_stop_callback: {e}", exc_info=True)
         await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-# Добавляем сообщение для групповых чатов
+async def get_switch_pm_button(bot_username: str) -> InlineKeyboardMarkup:
+    """Создает кнопку для перехода в личные сообщения"""
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        InlineKeyboardButton(
+            text="Перейти в личные сообщения",
+            url=f"https://t.me/{bot_username}?start=group_redirect"
+        )
+    )
+    return builder.as_markup()
+
+# Обновляем обработчики команд для групповых чатов
 @dp.message(Command("start"))
 async def cmd_start_group(message: types.Message):
     if message.chat.type != ChatType.PRIVATE:
+        bot_info = await bot.get_me()
         await message.answer(
             "👋 Привет! Я бот для отслеживания целей.\n"
-            "Чтобы начать работу, напишите мне в личные сообщения @Zaruba_resbot"
+            "Чтобы начать работу, нажмите кнопку ниже:",
+            reply_markup=await get_switch_pm_button(bot_info.username)
         )
         return
 
 @dp.message(Command("profile"))
 async def cmd_profile_group(message: types.Message):
     if message.chat.type != ChatType.PRIVATE:
+        bot_info = await bot.get_me()
         await message.answer(
-            "Чтобы просмотреть свой профиль, напишите мне в личные сообщения @Zaruba_resbot"
+            "Чтобы просмотреть свой профиль, нажмите кнопку ниже:",
+            reply_markup=await get_switch_pm_button(bot_info.username)
         )
         return
 
 @dp.message(Command("update"))
 async def cmd_update_group(message: types.Message):
     if message.chat.type != ChatType.PRIVATE:
+        bot_info = await bot.get_me()
         await message.answer(
-            "Чтобы изменить данные профиля, напишите мне в личные сообщения @Zaruba_resbot"
+            "Чтобы изменить данные профиля, нажмите кнопку ниже:",
+            reply_markup=await get_switch_pm_button(bot_info.username)
         )
         return
 
 @dp.message(Command("stop"))
 async def cmd_stop_group(message: types.Message):
     if message.chat.type != ChatType.PRIVATE:
+        bot_info = await bot.get_me()
         await message.answer(
-            "Чтобы удалить свой профиль, напишите мне в личные сообщения @Zaruba_resbot"
+            "Чтобы удалить свой профиль, нажмите кнопку ниже:",
+            reply_markup=await get_switch_pm_button(bot_info.username)
         )
         return
 
@@ -868,17 +886,24 @@ async def cmd_result_step(message: types.Message):
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     help_text = """
-Доступные команды:
-/start - Начать регистрацию (только в личных сообщениях)
-/profile - Показать свой профиль (только в личных сообщениях)
-/update - Обновить данные профиля (только в личных сообщениях)
-/stop - Удалить свои данные (только в личных сообщениях)
+🤖 Доступные команды:
+
+📱 В личных сообщениях:
+/start - Начать регистрацию
+/profile - Показать свой профиль
+/update - Обновить данные профиля
+/stop - Удалить свои данные
+
+👥 В любом чате:
+/complete - Отметить выполнение цели
 /result - Показать все выполненные цели
 /result_day - Показать результаты за вчерашний день
 /result_month - Показать результаты за текущий месяц
 /result_step - Показать результаты по шагам
-/help - Показать справку
+/help - Показать эту справку
 /info - Подробная инструкция
+
+💡 Подсказка: Для команд, доступных только в личных сообщениях, нажмите на кнопку "Перейти в личные сообщения" в групповом чате.
 """
     await message.answer(help_text)
 
@@ -887,8 +912,8 @@ async def cmd_info(message: types.Message):
     info_text = """
 🤖 Инструкция по использованию бота:
 
-1️⃣ Регистрация (только в личных сообщениях):
-• Нажмите /start
+1️⃣ Регистрация:
+• Нажмите /start в личных сообщениях
 • Введите своё имя
 • Укажите свою цель (например: "Бегать каждый день")
 • Выберите эмодзи для отображения в статистике
@@ -920,6 +945,8 @@ async def cmd_info(message: types.Message):
 • Убедитесь, что вы зарегистрированы перед использованием команд
 • При ошибках попробуйте повторить команду через несколько секунд
 • Если проблема сохраняется, обратитесь к администратору
+
+💡 Подсказка: Для команд, доступных только в личных сообщениях, нажмите на кнопку "Перейти в личные сообщения" в групповом чате.
 """
     await message.answer(info_text)
 
