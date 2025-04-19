@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -260,6 +260,23 @@ async def on_startup(bot: Bot) -> None:
     # Удаляем вебхук, если он существует
     await bot.delete_webhook()
     logger.info("Webhook deleted")
+    
+    # Регистрируем команды бота
+    commands = [
+        BotCommand(command="start", description="Начать регистрацию"),
+        BotCommand(command="complete", description="Отметить выполнение цели"),
+        BotCommand(command="result", description="Показать результаты"),
+        BotCommand(command="result_month", description="Показать результаты за месяц"),
+        BotCommand(command="result_step", description="Показать результаты по шагам"),
+        BotCommand(command="stop", description="Удалить свои данные"),
+        BotCommand(command="help", description="Показать справку")
+    ]
+    
+    try:
+        await bot.set_my_commands(commands=commands, scope=BotCommandScopeDefault())
+        logger.info("Bot commands registered successfully")
+    except Exception as e:
+        logger.error(f"Error registering bot commands: {e}", exc_info=True)
     
     # Получаем URL сервера из переменных окружения
     webhook_url = os.getenv("WEBHOOK_URL")
