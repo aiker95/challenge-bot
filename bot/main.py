@@ -13,7 +13,7 @@ from aiohttp import web
 from sqlalchemy import text
 
 from db.models import Base, User, Completion, create_async_engine_from_url, create_async_session
-from handlers.commands import cmd_result, cmd_result_all, cmd_result_month, cmd_result_step, cmd_help
+from handlers.commands import cmd_result, cmd_result_all, cmd_result_month, cmd_result_step, cmd_help, cmd_stop
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -108,6 +108,16 @@ async def cmd_start(message: types.Message):
             logger.info(f"Releasing lock for user {user_id}")
     except Exception as e:
         logger.error(f"Error in cmd_start: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+
+@dp.message(Command("stop"))
+async def cmd_stop_handler(message: types.Message):
+    try:
+        logger.info(f"Received /stop command from user {message.from_user.id}")
+        async with async_session() as session:
+            await cmd_stop(message, session)
+    except Exception as e:
+        logger.error(f"Error in cmd_stop: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.message()
