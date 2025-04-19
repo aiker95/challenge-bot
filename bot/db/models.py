@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, create_engine
+from sqlalchemy import Column, Integer, String, Date, ForeignKey, create_engine, BigInteger, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -10,12 +10,12 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
     
-    id = Column(Integer, primary_key=True)
-    telegram_id = Column(Integer, unique=True, nullable=False)
-    name = Column(String, nullable=False)
-    goal = Column(String, nullable=False)
-    emoji = Column(String, nullable=False)
-    created_at = Column(Date, default=datetime.now().date)
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_id = Column(BigInteger, unique=True, index=True)
+    name = Column(String)
+    goal = Column(String)
+    emoji = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
     completions = relationship("Completion", back_populates="user", cascade="all, delete-orphan")
 
