@@ -241,7 +241,6 @@ async def main():
     # Создаем приложение aiohttp
     app = web.Application()
     app.router.add_get("/", handle_root)
-    app.router.add_post("/webhook", handle_webhook)
     
     # Настраиваем обработчик вебхуков
     webhook_requests_handler = SimpleRequestHandler(
