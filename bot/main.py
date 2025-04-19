@@ -134,34 +134,39 @@ async def handle_message(message: types.Message):
             logger.info(f"Acquiring registration lock for user {user_id}")
             async with state["lock"]:
                 logger.info(f"Registration lock acquired for user {user_id}")
-                if state["step"] == 1:
-                    state["data"]["name"] = message.text
-                    state["step"] = 2
-                    logger.info(f"User {user_id} provided name: {message.text}")
-                    await message.answer("Какая у тебя цель? (1 строка)")
-                elif state["step"] == 2:
-                    state["data"]["goal"] = message.text
-                    state["step"] = 3
-                    logger.info(f"User {user_id} provided goal: {message.text}")
-                    await message.answer("Какой смайлик использовать в отчётах?")
-                elif state["step"] == 3:
-                    state["data"]["emoji"] = message.text
-                    state["data"]["telegram_id"] = user_id
-                    
-                    try:
-                        async with async_session() as session:
-                            new_user = User(**state["data"])
-                            session.add(new_user)
-                            await session.commit()
-                            logger.info(f"Successfully registered user {user_id}")
+                try:
+                    if state["step"] == 1:
+                        state["data"]["name"] = message.text
+                        state["step"] = 2
+                        logger.info(f"User {user_id} provided name: {message.text}")
+                        await message.answer("Какая у тебя цель? (1 строка)")
+                    elif state["step"] == 2:
+                        state["data"]["goal"] = message.text
+                        state["step"] = 3
+                        logger.info(f"User {user_id} provided goal: {message.text}")
+                        await message.answer("Какой смайлик использовать в отчётах?")
+                    elif state["step"] == 3:
+                        state["data"]["emoji"] = message.text
+                        state["data"]["telegram_id"] = user_id
                         
-                        del registration_states[user_id]
-                        logger.info(f"Registration completed and state cleared for user {user_id}")
-                        await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
-                    except Exception as e:
-                        logger.error(f"Error saving user {user_id} to database: {e}", exc_info=True)
-                        await message.answer("Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
-                logger.info(f"Releasing registration lock for user {user_id}")
+                        try:
+                            async with async_session() as session:
+                                new_user = User(**state["data"])
+                                session.add(new_user)
+                                await session.commit()
+                                logger.info(f"Successfully registered user {user_id}")
+                            
+                            del registration_states[user_id]
+                            logger.info(f"Registration completed and state cleared for user {user_id}")
+                            await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
+                        except Exception as e:
+                            logger.error(f"Error saving user {user_id} to database: {e}", exc_info=True)
+                            await message.answer("Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
+                except Exception as e:
+                    logger.error(f"Error in registration step {state['step']} for user {user_id}: {e}", exc_info=True)
+                    await message.answer("Произошла ошибка при обработке данных. Пожалуйста, попробуйте позже.")
+                finally:
+                    logger.info(f"Releasing registration lock for user {user_id}")
         
         elif message.text.startswith("/complete"):
             try:
