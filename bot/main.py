@@ -74,28 +74,21 @@ async def error_handler(update: types.Update, exception: Exception):
         logger.error(f"Telegram API error: {exception}")
     return True
 
-async def get_db():
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     try:
         logger.info(f"Received /start command from user {message.from_user.id}")
-        async for session in get_db():
-            user = session.query(User).filter(User.telegram_id == message.from_user.id).first()
-            
-            if not user:
-                registration_states[message.from_user.id] = {
-                    "step": 1,
-                    "data": {}
-                }
-                await message.answer("Давайте зарегистрируем вас! Как тебя зовут?")
-            else:
-                await message.answer("Вы уже зарегистрированы!")
+        session = SessionLocal()
+        user = session.query(User).filter(User.telegram_id == message.from_user.id).first()
+        
+        if not user:
+            registration_states[message.from_user.id] = {
+                "step": 1,
+                "data": {}
+            }
+            await message.answer("Давайте зарегистрируем вас! Как тебя зовут?")
+        else:
+            await message.answer("Вы уже зарегистрированы!")
     except Exception as e:
         logger.error(f"Error in cmd_start: {e}")
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -121,41 +114,41 @@ async def handle_message(message: Message):
                 state["data"]["emoji"] = message.text
                 state["data"]["telegram_id"] = user_id
                 
-                async for session in get_db():
-                    new_user = User(**state["data"])
-                    session.add(new_user)
-                    await session.commit()
-                    
-                    del registration_states[user_id]
-                    await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
+                session = SessionLocal()
+                new_user = User(**state["data"])
+                session.add(new_user)
+                session.commit()
+                
+                del registration_states[user_id]
+                await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
         
         elif message.text.startswith("/complete"):
             try:
                 date_str = message.text.split()[1]
                 date = datetime.strptime(date_str, "%d.%m.%Y").date()
                 
-                async for session in get_db():
-                    user = session.query(User).filter(User.telegram_id == user_id).first()
-                    
-                    if not user:
-                        await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
-                        return
-                    
-                    existing_completion = session.query(Completion).filter(
-                        Completion.user_id == user.id,
-                        Completion.date == date
-                    ).first()
-                    
-                    if existing_completion:
-                        await message.answer("Вы уже отметили выполнение на эту дату!")
-                        return
-                    
-                    new_completion = Completion(user_id=user.id, date=date)
-                    session.add(new_completion)
-                    await session.commit()
-                    
-                    await message.answer(f"Отлично! Выполнение на {date_str} зарегистрировано!")
-                    
+                session = SessionLocal()
+                user = session.query(User).filter(User.telegram_id == user_id).first()
+                
+                if not user:
+                    await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
+                    return
+                
+                existing_completion = session.query(Completion).filter(
+                    Completion.user_id == user.id,
+                    Completion.date == date
+                ).first()
+                
+                if existing_completion:
+                    await message.answer("Вы уже отметили выполнение на эту дату!")
+                    return
+                
+                new_completion = Completion(user_id=user.id, date=date)
+                session.add(new_completion)
+                session.commit()
+                
+                await message.answer(f"Отлично! Выполнение на {date_str} зарегистрировано!")
+                
             except (IndexError, ValueError):
                 await message.answer("Пожалуйста, укажите дату в формате ДД.ММ.ГГГГ")
             except Exception as e:
@@ -163,19 +156,19 @@ async def handle_message(message: Message):
                 await message.answer("Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
         
         elif message.text.startswith("/result"):
-            async for session in get_db():
-                if " " in message.text:
-                    await cmd_result(message, session)
-                else:
-                    await cmd_result_all(message, session)
+            session = SessionLocal()
+            if " " in message.text:
+                await cmd_result(message, session)
+            else:
+                await cmd_result_all(message, session)
         
         elif message.text.startswith("/result_month"):
-            async for session in get_db():
-                await cmd_result_month(message, session)
+            session = SessionLocal()
+            await cmd_result_month(message, session)
         
         elif message.text.startswith("/result_step"):
-            async for session in get_db():
-                await cmd_result_step(message, session)
+            session = SessionLocal()
+            await cmd_result_step(message, session)
         
         elif message.text == "/help":
             await cmd_help(message)
@@ -208,6 +201,16 @@ async def handle_root(request):
         content_type="text/plain"
     )
 
+async def handle_webhook(request):
+    logger.info("Webhook endpoint accessed")
+    try:
+        data = await request.json()
+        logger.info(f"Received webhook data: {data}")
+        return web.Response(text="OK")
+    except Exception as e:
+        logger.error(f"Error in webhook handler: {e}")
+        return web.Response(status=500, text="Internal Server Error")
+
 async def main():
     logger.info("Starting application...")
     # Создаем приложение aiohttp
@@ -215,6 +218,9 @@ async def main():
     
     # Добавляем обработчик для корневого URL
     app.router.add_get('/', handle_root)
+    
+    # Добавляем обработчик для вебхука
+    app.router.add_post('/webhook', handle_webhook)
     
     # Настраиваем вебхук
     webhook_requests_handler = SimpleRequestHandler(
