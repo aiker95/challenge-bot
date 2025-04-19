@@ -220,6 +220,18 @@ async def main():
     logger.info(f"PORT: {os.getenv('PORT', 8000)}")
     logger.info(f"DB_URL: {os.getenv('DB_URL')}")
     
+    # Получаем информацию о боте
+    try:
+        bot_info = await bot.get_me()
+        logger.info("Bot information:")
+        logger.info(f"Bot ID: {bot_info.id}")
+        logger.info(f"Bot username: @{bot_info.username}")
+        logger.info(f"Bot name: {bot_info.first_name}")
+        if bot_info.last_name:
+            logger.info(f"Bot last name: {bot_info.last_name}")
+    except Exception as e:
+        logger.error(f"Failed to get bot info: {e}")
+    
     # Создаем приложение aiohttp
     app = web.Application()
     
