@@ -88,11 +88,13 @@ async def cmd_start(message: types.Message):
                     "step": 1,
                     "data": {}
                 }
+                logger.info(f"Starting registration for user {message.from_user.id}")
                 await message.answer("Давайте зарегистрируем вас! Как тебя зовут?")
             else:
+                logger.info(f"User {message.from_user.id} already registered")
                 await message.answer("Вы уже зарегистрированы!")
     except Exception as e:
-        logger.error(f"Error in cmd_start: {e}")
+        logger.error(f"Error in cmd_start: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.message()
@@ -103,31 +105,40 @@ async def handle_message(message: types.Message):
         
         if user_id in registration_states:
             state = registration_states[user_id]
+            logger.info(f"Processing registration step {state['step']} for user {user_id}")
             
             if state["step"] == 1:
                 state["data"]["name"] = message.text
                 state["step"] = 2
+                logger.info(f"User {user_id} provided name: {message.text}")
                 await message.answer("Какая у тебя цель? (1 строка)")
             elif state["step"] == 2:
                 state["data"]["goal"] = message.text
                 state["step"] = 3
+                logger.info(f"User {user_id} provided goal: {message.text}")
                 await message.answer("Какой смайлик использовать в отчётах?")
             elif state["step"] == 3:
                 state["data"]["emoji"] = message.text
                 state["data"]["telegram_id"] = user_id
                 
-                async with async_session() as session:
-                    new_user = User(**state["data"])
-                    session.add(new_user)
-                    await session.commit()
-                
-                del registration_states[user_id]
-                await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
+                try:
+                    async with async_session() as session:
+                        new_user = User(**state["data"])
+                        session.add(new_user)
+                        await session.commit()
+                        logger.info(f"Successfully registered user {user_id}")
+                    
+                    del registration_states[user_id]
+                    await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
+                except Exception as e:
+                    logger.error(f"Error saving user {user_id} to database: {e}", exc_info=True)
+                    await message.answer("Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
         
         elif message.text.startswith("/complete"):
             try:
                 date_str = message.text.split()[1]
                 date = datetime.strptime(date_str, "%d.%m.%Y").date()
+                logger.info(f"Processing completion for user {user_id} on date {date}")
                 
                 async with async_session() as session:
                     result = await session.execute(
@@ -136,6 +147,7 @@ async def handle_message(message: types.Message):
                     user = result.first()
                     
                     if not user:
+                        logger.warning(f"User {user_id} not found in database")
                         await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
                         return
                     
@@ -148,41 +160,65 @@ async def handle_message(message: types.Message):
                     existing_completion = result.first()
                     
                     if existing_completion:
+                        logger.info(f"User {user_id} already completed on {date}")
                         await message.answer("Вы уже отметили выполнение на эту дату!")
                         return
                     
                     new_completion = Completion(user_id=user.id, date=date)
                     session.add(new_completion)
                     await session.commit()
+                    logger.info(f"Successfully added completion for user {user_id} on {date}")
                     
                     await message.answer(f"Отлично! Выполнение на {date_str} зарегистрировано!")
                 
-            except (IndexError, ValueError):
+            except (IndexError, ValueError) as e:
+                logger.error(f"Invalid date format from user {user_id}: {message.text}", exc_info=True)
                 await message.answer("Пожалуйста, укажите дату в формате ДД.ММ.ГГГГ")
             except Exception as e:
-                logger.error(f"Error in complete command: {e}")
+                logger.error(f"Error in complete command for user {user_id}: {e}", exc_info=True)
                 await message.answer("Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
         
         elif message.text.startswith("/result"):
-            async with async_session() as session:
-                if " " in message.text:
-                    await cmd_result(message, session)
-                else:
-                    await cmd_result_all(message, session)
+            try:
+                async with async_session() as session:
+                    if " " in message.text:
+                        logger.info(f"Processing detailed result for user {user_id}")
+                        await cmd_result(message, session)
+                    else:
+                        logger.info(f"Processing all results for user {user_id}")
+                        await cmd_result_all(message, session)
+            except Exception as e:
+                logger.error(f"Error in result command for user {user_id}: {e}", exc_info=True)
+                await message.answer("Произошла ошибка при получении результатов. Пожалуйста, попробуйте позже.")
         
         elif message.text.startswith("/result_month"):
-            async with async_session() as session:
-                await cmd_result_month(message, session)
+            try:
+                async with async_session() as session:
+                    logger.info(f"Processing monthly result for user {user_id}")
+                    await cmd_result_month(message, session)
+            except Exception as e:
+                logger.error(f"Error in result_month command for user {user_id}: {e}", exc_info=True)
+                await message.answer("Произошла ошибка при получении месячных результатов. Пожалуйста, попробуйте позже.")
         
         elif message.text.startswith("/result_step"):
-            async with async_session() as session:
-                await cmd_result_step(message, session)
+            try:
+                async with async_session() as session:
+                    logger.info(f"Processing step result for user {user_id}")
+                    await cmd_result_step(message, session)
+            except Exception as e:
+                logger.error(f"Error in result_step command for user {user_id}: {e}", exc_info=True)
+                await message.answer("Произошла ошибка при получении результатов по шагам. Пожалуйста, попробуйте позже.")
         
         elif message.text == "/help":
-            await cmd_help(message)
+            try:
+                logger.info(f"Processing help command for user {user_id}")
+                await cmd_help(message)
+            except Exception as e:
+                logger.error(f"Error in help command for user {user_id}: {e}", exc_info=True)
+                await message.answer("Произошла ошибка при отображении справки. Пожалуйста, попробуйте позже.")
             
     except Exception as e:
-        logger.error(f"Error in handle_message: {e}")
+        logger.error(f"Error in handle_message for user {user_id}: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 async def on_startup(bot: Bot) -> None:
