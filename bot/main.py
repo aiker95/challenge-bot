@@ -1145,7 +1145,7 @@ async def process_complete_callback(callback: CallbackQuery, callback_answer: Ca
         callback_answer.text = "❌ Произошла ошибка при сохранении выполнения цели"
         callback_answer.show_alert = True
 
-async def on_startup(bot: Bot, app: web.Application) -> None:
+async def on_startup(bot: Bot) -> None:
     logger.info("Starting bot...")
     # Удаляем вебхук, если он существует
     await bot.delete_webhook()
@@ -1171,17 +1171,6 @@ async def on_startup(bot: Bot, app: web.Application) -> None:
         logger.info("Bot commands registered successfully")
     except Exception as e:
         logger.error(f"Error registering bot commands: {e}", exc_info=True)
-    
-    # Получаем URL сервера из переменных окружения
-    webhook_url = os.getenv("WEBHOOK_URL")
-    if webhook_url:
-        logger.info(f"Setting webhook to {webhook_url}")
-        # Устанавливаем вебхук
-        await bot.set_webhook(
-            url=webhook_url,
-            drop_pending_updates=True
-        )
-        logger.info("Webhook set successfully")
 
 async def handle_root(request):
     logger.info("Root endpoint accessed")
@@ -1219,7 +1208,21 @@ async def main():
     # Запускаем приложение
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Application started on port {port}")
-    await on_startup(bot, app)
+    
+    # Инициализируем бота
+    await on_startup(bot)
+    
+    # Устанавливаем вебхук
+    webhook_url = os.getenv("WEBHOOK_URL")
+    if webhook_url:
+        logger.info(f"Setting webhook to {webhook_url}")
+        await bot.set_webhook(
+            url=webhook_url,
+            drop_pending_updates=True
+        )
+        logger.info("Webhook set successfully")
+    
+    # Запускаем сервер
     await web._run_app(app, port=port)
 
 if __name__ == "__main__":
