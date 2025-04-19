@@ -3,16 +3,18 @@ import logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.filters.chat_type import ChatTypeFilter
-from aiogram.types import Message, BotCommand, BotCommandScopeDefault, InlineKeyboardMarkup, InlineKeyboardButton, ChatType
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault, InlineKeyboardMarkup, InlineKeyboardButton, ChatType, CallbackQuery
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.callback_answer import CallbackAnswerMiddleware
 
 from db.models import Base, User, Completion, create_async_engine_from_url, create_async_session
 
@@ -29,6 +31,9 @@ logger = logging.getLogger(__name__)
 # Инициализация бота и диспетчера
 bot = Bot(token=os.getenv("TOKEN"))
 dp = Dispatcher()
+
+# Добавляем middleware для автоматического ответа на callback-запросы
+dp.callback_query.middleware(CallbackAnswerMiddleware())
 
 # Настройка базы данных
 engine = create_async_engine_from_url(os.getenv("DB_URL"))
@@ -79,8 +84,14 @@ async def error_handler(update: types.Update, exception: Exception):
 async def is_private_chat(message: types.Message) -> bool:
     return message.chat.type == ChatType.PRIVATE
 
-@dp.message(Command("start"), ChatTypeFilter(chat_type=ChatType.PRIVATE))
+@dp.message(Command("start"), F.chat.type == ChatType.PRIVATE)
 async def cmd_start(message: types.Message):
+    if not await is_private_chat(message):
+        await message.answer(
+            "👋 Привет! Я бот для отслеживания целей.\n"
+            "Чтобы начать работу, напишите мне в личные сообщения @Zaruba_resbot"
+        )
+        return
     try:
         user_id = message.from_user.id
         logger.info(f"Received /start command from user {user_id}")
@@ -335,8 +346,13 @@ async def restart_registration_callback(callback_query: types.CallbackQuery):
         await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 # Обновление профиля
-@dp.message(Command("update"), ChatTypeFilter(chat_type=ChatType.PRIVATE))
+@dp.message(Command("update"), F.chat.type == ChatType.PRIVATE)
 async def cmd_update(message: types.Message):
+    if not await is_private_chat(message):
+        await message.answer(
+            "Чтобы изменить данные профиля, напишите мне в личные сообщения @Zaruba_resbot"
+        )
+        return
     try:
         user_id = message.from_user.id
         logger.info(f"Received /update command from user {user_id}")
@@ -475,8 +491,13 @@ async def select_update_emoji_callback(callback_query: types.CallbackQuery):
         await callback_query.message.answer("Произошла ошибка при обновлении эмодзи. Пожалуйста, попробуйте позже.")
 
 # Добавляем фильтр ChatTypeFilter к остальным командам профиля
-@dp.message(Command("profile"), ChatTypeFilter(chat_type=ChatType.PRIVATE))
+@dp.message(Command("profile"), F.chat.type == ChatType.PRIVATE)
 async def cmd_profile(message: types.Message):
+    if not await is_private_chat(message):
+        await message.answer(
+            "Чтобы просмотреть свой профиль, напишите мне в личные сообщения @Zaruba_resbot"
+        )
+        return
     try:
         user_id = message.from_user.id
         logger.info(f"Received /profile command from user {user_id}")
@@ -528,8 +549,13 @@ async def cmd_profile(message: types.Message):
         logger.error(f"Error in cmd_profile: {e}", exc_info=True)
         await message.answer("Произошла ошибка при получении профиля.")
 
-@dp.message(Command("stop"), ChatTypeFilter(chat_type=ChatType.PRIVATE))
+@dp.message(Command("stop"), F.chat.type == ChatType.PRIVATE)
 async def cmd_stop(message: types.Message):
+    if not await is_private_chat(message):
+        await message.answer(
+            "Чтобы удалить свой профиль, напишите мне в личные сообщения @Zaruba_resbot"
+        )
+        return
     try:
         user_id = message.from_user.id
         logger.info(f"Received /stop command from user {user_id}")
@@ -903,43 +929,46 @@ async def cmd_complete(message: types.Message):
         user_id = message.from_user.id
         logger.info(f"Received /complete command from user {user_id}")
         
-        # Создаем клавиатуру с кнопками выбора даты
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="Сегодня",
-                        callback_data=f"complete_{datetime.now().date().strftime('%Y-%m-%d')}"
-                    ),
-                    InlineKeyboardButton(
-                        text="Вчера",
-                        callback_data=f"complete_{(datetime.now().date() - timedelta(days=1)).strftime('%Y-%m-%d')}"
-                    )
-                ]
-            ]
+        # Создаем клавиатуру с помощью InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        today = datetime.now().date()
+        yesterday = today - timedelta(days=1)
+        
+        builder.add(
+            InlineKeyboardButton(
+                text="Сегодня",
+                callback_data=f"complete_{today.strftime('%Y-%m-%d')}"
+            ),
+            InlineKeyboardButton(
+                text="Вчера",
+                callback_data=f"complete_{yesterday.strftime('%Y-%m-%d')}"
+            )
         )
         
         await message.answer(
             "Выберите дату для отметки выполнения цели:",
-            reply_markup=keyboard
+            reply_markup=builder.as_markup()
         )
     except Exception as e:
         logger.error(f"Error in cmd_complete: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@dp.callback_query(lambda c: c.data.startswith('complete_'))
-async def process_complete_callback(callback_query: types.CallbackQuery):
+@dp.callback_query(F.data.startswith("complete_"))
+async def process_complete_callback(callback: CallbackQuery):
     try:
-        user_id = callback_query.from_user.id
-        data = callback_query.data.split('_')[1]
+        user_id = callback.from_user.id
+        data = callback.data.split('_')[1]
         
         # Обработка выбранной даты
         selected_date = datetime.strptime(data, "%Y-%m-%d").date()
-        await process_completion(user_id, selected_date, callback_query.message)
+        await process_completion(user_id, selected_date, callback.message)
         
+        # Автоматический ответ на callback-запрос
+        await callback.answer("✅ Выполнение отмечено!")
     except Exception as e:
         logger.error(f"Error in process_complete_callback: {e}", exc_info=True)
-        await callback_query.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+        await callback.message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
 
 async def process_completion(user_id: int, date: datetime.date, message: types.Message):
     try:
