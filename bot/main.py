@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
 from aiogram import Bot, Dispatcher, types
@@ -10,10 +10,10 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
-from sqlalchemy import text
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Base, User, Completion, create_async_engine_from_url, create_async_session
-from handlers.commands import cmd_result, cmd_result_all, cmd_result_month, cmd_result_step, cmd_help, cmd_stop, cmd_result_day
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -111,168 +111,357 @@ async def cmd_start(message: types.Message):
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.message(Command("stop"))
-async def cmd_stop_handler(message: types.Message):
-    try:
-        logger.info(f"Received /stop command from user {message.from_user.id}")
-        async with async_session() as session:
-            await cmd_stop(message, session)
-    except Exception as e:
-        logger.error(f"Error in cmd_stop: {e}", exc_info=True)
-        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
-
-@dp.message()
-async def handle_message(message: types.Message):
+async def cmd_stop(message: types.Message):
     try:
         user_id = message.from_user.id
-        logger.info(f"Received message from user {user_id}: {message.text}")
+        logger.info(f"Received /stop command from user {user_id}")
         
-        if user_id in registration_states:
-            state = registration_states[user_id]
-            logger.info(f"Processing registration step {state['step']} for user {user_id}")
+        async with async_session() as session:
+            # Находим пользователя
+            user = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = user.scalar_one_or_none()
             
-            # Используем блокировку для этого пользователя
-            logger.info(f"Acquiring registration lock for user {user_id}")
-            async with state["lock"]:
-                logger.info(f"Registration lock acquired for user {user_id}")
-                try:
-                    if state["step"] == 1:
-                        logger.info(f"Processing step 1 for user {user_id}")
-                        state["data"]["name"] = message.text
-                        state["step"] = 2
-                        logger.info(f"User {user_id} provided name: {message.text}")
-                        await message.answer("Какая у тебя цель? (1 строка)")
-                        logger.info(f"Sent goal question to user {user_id}")
-                    elif state["step"] == 2:
-                        logger.info(f"Processing step 2 for user {user_id}")
-                        state["data"]["goal"] = message.text
-                        state["step"] = 3
-                        logger.info(f"User {user_id} provided goal: {message.text}")
-                        await message.answer("Какой смайлик использовать в отчётах?")
-                        logger.info(f"Sent emoji question to user {user_id}")
-                    elif state["step"] == 3:
-                        logger.info(f"Processing step 3 for user {user_id}")
-                        state["data"]["emoji"] = message.text
-                        state["data"]["telegram_id"] = user_id
-                        
-                        try:
-                            logger.info(f"Saving user {user_id} to database")
-                            async with async_session() as session:
-                                new_user = User(**state["data"])
-                                session.add(new_user)
-                                await session.commit()
-                                logger.info(f"Successfully registered user {user_id}")
-                            
-                            del registration_states[user_id]
-                            logger.info(f"Registration completed and state cleared for user {user_id}")
-                            await message.answer("Регистрация завершена! Теперь вы можете использовать команды в групповом чате.")
-                            logger.info(f"Sent completion message to user {user_id}")
-                        except Exception as e:
-                            logger.error(f"Error saving user {user_id} to database: {e}", exc_info=True)
-                            await message.answer("Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже.")
-                except Exception as e:
-                    logger.error(f"Error in registration step {state['step']} for user {user_id}: {e}", exc_info=True)
-                    await message.answer("Произошла ошибка при обработке данных. Пожалуйста, попробуйте позже.")
-                finally:
-                    logger.info(f"Releasing registration lock for user {user_id}")
-        else:
-            logger.info(f"User {user_id} is not in registration process")
+            if not user:
+                await message.answer("Вы не зарегистрированы.")
+                return
             
-            if message.text.startswith("/complete"):
-                try:
-                    date_str = message.text.split()[1]
-                    date = datetime.strptime(date_str, "%d.%m.%Y").date()
-                    logger.info(f"Processing completion for user {user_id} on date {date}")
-                    
-                    async with async_session() as session:
-                        result = await session.execute(
-                            User.__table__.select().where(User.telegram_id == user_id)
-                        )
-                        user = result.first()
-                        
-                        if not user:
-                            logger.warning(f"User {user_id} not found in database")
-                            await message.answer("Пожалуйста, сначала зарегистрируйтесь с помощью команды /start")
-                            return
-                        
-                        result = await session.execute(
-                            Completion.__table__.select().where(
-                                Completion.user_id == user.id,
-                                Completion.date == date
-                            )
-                        )
-                        existing_completion = result.first()
-                        
-                        if existing_completion:
-                            logger.info(f"User {user_id} already completed on {date}")
-                            await message.answer("Вы уже отметили выполнение на эту дату!")
-                            return
-                        
-                        new_completion = Completion(user_id=user.id, date=date)
-                        session.add(new_completion)
-                        await session.commit()
-                        logger.info(f"Successfully added completion for user {user_id} on {date}")
-                        
-                        await message.answer(f"Отлично! Выполнение на {date_str} зарегистрировано!")
-                    
-                except (IndexError, ValueError) as e:
-                    logger.error(f"Invalid date format from user {user_id}: {message.text}", exc_info=True)
-                    await message.answer("Пожалуйста, укажите дату в формате ДД.ММ.ГГГГ")
-                except Exception as e:
-                    logger.error(f"Error in complete command for user {user_id}: {e}", exc_info=True)
-                    await message.answer("Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже.")
+            # Удаляем все выполнения пользователя
+            await session.execute(
+                Completion.__table__.delete()
+                .where(Completion.user_id == user.id)
+            )
             
-            elif message.text.startswith("/result"):
-                try:
-                    async with async_session() as session:
-                        if " " in message.text:
-                            logger.info(f"Processing detailed result for user {user_id}")
-                            await cmd_result(message, session)
-                        else:
-                            logger.info(f"Processing all results for user {user_id}")
-                            await cmd_result_all(message, session)
-                except Exception as e:
-                    logger.error(f"Error in result command for user {user_id}: {e}", exc_info=True)
-                    await message.answer("Произошла ошибка при получении результатов. Пожалуйста, попробуйте позже.")
+            # Удаляем пользователя
+            await session.execute(
+                User.__table__.delete()
+                .where(User.id == user.id)
+            )
             
-            elif message.text.startswith("/result_month"):
-                try:
-                    async with async_session() as session:
-                        logger.info(f"Processing monthly result for user {user_id}")
-                        await cmd_result_month(message, session)
-                except Exception as e:
-                    logger.error(f"Error in result_month command for user {user_id}: {e}", exc_info=True)
-                    await message.answer("Произошла ошибка при получении месячных результатов. Пожалуйста, попробуйте позже.")
-            
-            elif message.text.startswith("/result_step"):
-                try:
-                    async with async_session() as session:
-                        logger.info(f"Processing step result for user {user_id}")
-                        await cmd_result_step(message, session)
-                except Exception as e:
-                    logger.error(f"Error in result_step command for user {user_id}: {e}", exc_info=True)
-                    await message.answer("Произошла ошибка при получении результатов по шагам. Пожалуйста, попробуйте позже.")
-            
-            elif message.text == "/help":
-                try:
-                    logger.info(f"Processing help command for user {user_id}")
-                    await cmd_help(message)
-                except Exception as e:
-                    logger.error(f"Error in help command for user {user_id}: {e}", exc_info=True)
-                    await message.answer("Произошла ошибка при отображении справки. Пожалуйста, попробуйте позже.")
-            
+            await session.commit()
+            await message.answer("Ваши данные успешно удалены. Спасибо за участие!")
     except Exception as e:
-        logger.error(f"Error in handle_message for user {user_id}: {e}", exc_info=True)
-        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
+        logger.error(f"Error in cmd_stop: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при удалении данных.")
+
+@dp.message(Command("profile"))
+async def cmd_profile(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        logger.info(f"Received /profile command from user {user_id}")
+        
+        async with async_session() as session:
+            # Получаем пользователя
+            user = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = user.scalar_one_or_none()
+            
+            if not user:
+                await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
+                return
+            
+            # Получаем статистику выполнения
+            completions = await session.execute(
+                select(Completion)
+                .where(Completion.user_id == user.id)
+                .order_by(Completion.date)
+            )
+            completions = completions.scalars().all()
+            
+            # Получаем первую и последнюю дату выполнения
+            dates = await session.execute(
+                select(Completion.date)
+                .order_by(Completion.date)
+            )
+            dates = dates.scalars().all()
+            
+            total_days = 0
+            if dates:
+                first_date = dates[0]
+                last_date = dates[-1]
+                total_days = (last_date - first_date).days + 1
+            
+            profile_message = (
+                f"👤 Ваш профиль:\n\n"
+                f"Имя: {user.name}\n"
+                f"Цель: {user.goal}\n"
+                f"Эмодзи: {user.emoji}\n"
+                f"Выполнено дней: {len(completions)}/{total_days if total_days > 0 else '?'}\n"
+                f"Дата регистрации: {user.created_at.strftime('%d.%m.%Y')}"
+            )
+            
+            await message.answer(profile_message)
+    except Exception as e:
+        logger.error(f"Error in cmd_profile: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении профиля.")
+
+@dp.message(Command("update"))
+async def cmd_update(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        logger.info(f"Received /update command from user {user_id}")
+        
+        async with async_session() as session:
+            # Получаем пользователя
+            user = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = user.scalar_one_or_none()
+            
+            if not user:
+                await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
+                return
+            
+            # Проверяем, есть ли текст после команды
+            if not message.text or len(message.text.split()) < 2:
+                await message.answer(
+                    "Используйте команду в формате:\n"
+                    "/update [имя/цель/эмодзи] [новое значение]\n\n"
+                    "Примеры:\n"
+                    "/update имя Иван\n"
+                    "/update цель Бегать каждый день\n"
+                    "/update эмодзи 🏃"
+                )
+                return
+            
+            # Разбираем команду
+            parts = message.text.split(maxsplit=2)
+            field = parts[1].lower()
+            new_value = parts[2] if len(parts) > 2 else None
+            
+            if field not in ["имя", "цель", "эмодзи"]:
+                await message.answer("Неверное поле для обновления. Используйте: имя, цель или эмодзи.")
+                return
+            
+            if not new_value:
+                await message.answer("Укажите новое значение.")
+                return
+            
+            # Обновляем данные
+            if field == "имя":
+                user.name = new_value
+            elif field == "цель":
+                user.goal = new_value
+            elif field == "эмодзи":
+                user.emoji = new_value
+            
+            await session.commit()
+            
+            # Показываем обновленный профиль
+            await cmd_profile(message)
+    except Exception as e:
+        logger.error(f"Error in cmd_update: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при обновлении профиля.")
+
+@dp.message(Command("result"))
+async def cmd_result(message: types.Message):
+    try:
+        logger.info(f"Received /result command from user {message.from_user.id}")
+        
+        async with async_session() as session:
+            # Получаем всех пользователей
+            users = await session.execute(select(User))
+            users = users.scalars().all()
+            
+            if not users:
+                await message.answer("Нет зарегистрированных пользователей.")
+                return
+            
+            # Получаем первую и последнюю дату выполнения
+            dates = await session.execute(
+                select(Completion.date)
+                .order_by(Completion.date)
+            )
+            dates = dates.scalars().all()
+            
+            if not dates:
+                await message.answer("Пока нет выполненных целей.")
+                return
+            
+            first_date = dates[0]
+            last_date = dates[-1]
+            total_days = (last_date - first_date).days + 1
+            
+            # Формируем сообщение для каждого пользователя
+            result_message = "Результаты всех пользователей:\n\n"
+            
+            for user in users:
+                # Получаем все выполнения для пользователя
+                completions = await session.execute(
+                    select(Completion)
+                    .where(Completion.user_id == user.id)
+                    .order_by(Completion.date)
+                )
+                completions = completions.scalars().all()
+                
+                completed_days = len(completions)
+                result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
+            
+            await message.answer(result_message)
+    except Exception as e:
+        logger.error(f"Error in cmd_result: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении результатов.")
 
 @dp.message(Command("result_day"))
-async def cmd_result_day_handler(message: types.Message):
+async def cmd_result_day(message: types.Message):
     try:
         logger.info(f"Received /result_day command from user {message.from_user.id}")
+        
         async with async_session() as session:
-            await cmd_result_day(message, session)
+            # Получаем всех пользователей
+            users = await session.execute(select(User))
+            users = users.scalars().all()
+            
+            if not users:
+                await message.answer("Нет зарегистрированных пользователей.")
+                return
+            
+            # Получаем вчерашнюю дату
+            yesterday = datetime.now().date() - timedelta(days=1)
+            
+            # Формируем сообщение
+            result_message = f"Результаты за {yesterday.strftime('%d.%m.%Y')}:\n\n"
+            
+            for user in users:
+                # Проверяем выполнение за вчера
+                completion = await session.execute(
+                    select(Completion)
+                    .where(
+                        Completion.user_id == user.id,
+                        Completion.date == yesterday
+                    )
+                )
+                completion = completion.scalar_one_or_none()
+                
+                if completion:
+                    result_message += f"{user.name} {user.emoji}: ✅\n"
+                else:
+                    result_message += f"{user.name} {user.emoji}: ❌\n"
+            
+            await message.answer(result_message)
     except Exception as e:
         logger.error(f"Error in cmd_result_day: {e}", exc_info=True)
         await message.answer("Произошла ошибка при получении результатов за вчерашний день.")
+
+@dp.message(Command("result_month"))
+async def cmd_result_month(message: types.Message):
+    try:
+        logger.info(f"Received /result_month command from user {message.from_user.id}")
+        
+        async with async_session() as session:
+            # Получаем всех пользователей
+            users = await session.execute(select(User))
+            users = users.scalars().all()
+            
+            if not users:
+                await message.answer("Нет зарегистрированных пользователей.")
+                return
+            
+            # Получаем текущий месяц
+            today = datetime.now().date()
+            first_day = today.replace(day=1)
+            if today.month == 12:
+                last_day = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                last_day = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
+            
+            # Формируем сообщение
+            result_message = f"Результаты за {today.strftime('%B %Y')}:\n\n"
+            
+            for user in users:
+                # Получаем выполнения за текущий месяц
+                completions = await session.execute(
+                    select(Completion)
+                    .where(
+                        Completion.user_id == user.id,
+                        Completion.date >= first_day,
+                        Completion.date <= last_day
+                    )
+                    .order_by(Completion.date)
+                )
+                completions = completions.scalars().all()
+                
+                completed_days = len(completions)
+                total_days = (last_day - first_day).days + 1
+                result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
+            
+            await message.answer(result_message)
+    except Exception as e:
+        logger.error(f"Error in cmd_result_month: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении месячных результатов.")
+
+@dp.message(Command("result_step"))
+async def cmd_result_step(message: types.Message):
+    try:
+        logger.info(f"Received /result_step command from user {message.from_user.id}")
+        
+        async with async_session() as session:
+            # Получаем всех пользователей
+            users = await session.execute(select(User))
+            users = users.scalars().all()
+            
+            if not users:
+                await message.answer("Нет зарегистрированных пользователей.")
+                return
+            
+            # Получаем все даты выполнения
+            dates = await session.execute(
+                select(Completion.date)
+                .distinct()
+                .order_by(Completion.date)
+            )
+            dates = dates.scalars().all()
+            
+            if not dates:
+                await message.answer("Пока нет выполненных целей.")
+                return
+            
+            # Формируем сообщение
+            result_message = "Результаты по шагам:\n\n"
+            
+            for date in dates:
+                result_message += f"{date.strftime('%d.%m.%Y')}:\n"
+                for user in users:
+                    # Проверяем выполнение для каждого пользователя
+                    completion = await session.execute(
+                        select(Completion)
+                        .where(
+                            Completion.user_id == user.id,
+                            Completion.date == date
+                        )
+                    )
+                    completion = completion.scalar_one_or_none()
+                    
+                    if completion:
+                        result_message += f"{user.name} {user.emoji}\n"
+                result_message += "\n"
+            
+            await message.answer(result_message)
+    except Exception as e:
+        logger.error(f"Error in cmd_result_step: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении результатов по шагам.")
+
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    help_text = """
+Доступные команды:
+/start - Начать регистрацию
+/complete ДД.ММ.ГГГГ - Отметить выполнение цели на указанную дату
+/result - Показать все выполненные цели
+/result_day - Показать результаты за вчерашний день
+/result_month - Показать результаты за текущий месяц
+/result_step - Показать результаты по шагам
+/profile - Показать свой профиль
+/update [имя/цель/эмодзи] [значение] - Обновить данные профиля
+/stop - Удалить свои данные
+/help - Показать справку
+"""
+    await message.answer(help_text)
 
 async def on_startup(bot: Bot) -> None:
     logger.info("Starting bot...")
@@ -288,6 +477,8 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="result_day", description="Показать результаты за вчера"),
         BotCommand(command="result_month", description="Показать результаты за месяц"),
         BotCommand(command="result_step", description="Показать результаты по шагам"),
+        BotCommand(command="profile", description="Показать свой профиль"),
+        BotCommand(command="update", description="Обновить данные профиля"),
         BotCommand(command="stop", description="Удалить свои данные"),
         BotCommand(command="help", description="Показать справку")
     ]
