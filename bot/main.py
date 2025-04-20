@@ -29,30 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Инициализация бота и диспетчера
-bot = Bot(token=os.getenv("TOKEN"))
-dp = Dispatcher()
-router = Router()
-
-# Регистрация middleware
-dp.update.middleware(ThrottlingMiddleware())
-dp.update.middleware(LoggingMiddleware())
-dp.update.middleware(CallbackLoggingMiddleware())
-
-# Включаем роутер в диспетчер
-dp.include_router(router)
-
-# Настройка базы данных
-engine = create_async_engine_from_url(os.getenv("DB_URL"))
-async_session = create_async_session(engine)
-
-# Состояния регистрации
-registration_states = {}
-registration_locks = {}
-
-# Добавим состояние для обновления профиля
-update_states = {}
-
+# Определение middleware классов
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, limit=1):
         self.limit = limit
@@ -86,7 +63,6 @@ class CallbackLoggingMiddleware(BaseMiddleware):
         if isinstance(event, types.CallbackQuery):
             logger.info(f"Received callback query: {event.data} from user {event.from_user.id}")
             logger.debug(f"Callback details: {event}")
-            # Добавляем информацию о времени обработки
             start_time = datetime.now()
             result = await handler(event, data)
             end_time = datetime.now()
@@ -95,6 +71,29 @@ class CallbackLoggingMiddleware(BaseMiddleware):
             return result
         return await handler(event, data)
 
+# Инициализация базовых объектов
+bot = Bot(token=os.getenv("TOKEN"))
+dp = Dispatcher()
+router = Router()
+
+# Регистрация middleware
+dp.update.middleware(ThrottlingMiddleware())
+dp.update.middleware(LoggingMiddleware())
+dp.update.middleware(CallbackLoggingMiddleware())
+
+# Включение роутера
+dp.include_router(router)
+
+# Настройка базы данных
+engine = create_async_engine_from_url(os.getenv("DB_URL"))
+async_session = create_async_session(engine)
+
+# Состояния регистрации
+registration_states = {}
+registration_locks = {}
+update_states = {}
+
+# Обработчики ошибок
 @router.errors()
 async def error_handler(update: types.Update, exception: Exception):
     logger.error(f"Update {update} caused error {exception}")
@@ -106,6 +105,7 @@ async def error_handler(update: types.Update, exception: Exception):
 async def is_private_chat(message: types.Message) -> bool:
     return message.chat.type == ChatType.PRIVATE
 
+# Обработчики команд и callback-запросов
 @router.message(Command("start"), F.chat.type == ChatType.PRIVATE)
 async def cmd_start(message: types.Message):
     if not await is_private_chat(message):
