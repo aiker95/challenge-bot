@@ -32,15 +32,6 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=os.getenv("TOKEN"))
 dp = Dispatcher()
 
-# Добавляем middleware для автоматического ответа на callback-запросы
-dp.callback_query.middleware(
-    CallbackAnswerMiddleware(
-        pre=True,  # Отвечаем до выполнения хэндлера
-        text="⏳ Обработка...",  # Текст по умолчанию
-        show_alert=False
-    )
-)
-
 # Настройка базы данных
 engine = create_async_engine_from_url(os.getenv("DB_URL"))
 async_session = create_async_session(engine)
