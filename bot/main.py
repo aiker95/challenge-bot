@@ -1117,6 +1117,27 @@ async def on_startup(bot: Bot) -> None:
     except Exception as e:
         logger.error(f"Error registering bot commands: {e}", exc_info=True)
 
+    # Отправляем уведомление о перезапуске
+    try:
+        async with async_session() as session:
+            async with session.begin():
+                # Получаем всех пользователей
+                result = await session.execute(select(User))
+                users = result.scalars().all()
+                
+                for user in users:
+                    try:
+                        await bot.send_message(
+                            user.telegram_id,
+                            "🔄 Бот перезапущен и готов к работе!\n"
+                            "Если у вас возникли проблемы с выполнением команд, "
+                            "пожалуйста, попробуйте повторить запрос."
+                        )
+                    except Exception as e:
+                        logger.error(f"Error sending restart notification to user {user.telegram_id}: {e}")
+    except Exception as e:
+        logger.error(f"Error sending restart notifications: {e}")
+
 async def handle_root(request):
     logger.info("Root endpoint accessed")
     return web.Response(
