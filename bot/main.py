@@ -165,14 +165,10 @@ async def cmd_start(message: types.Message):
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.callback_query(F.data == "start_registration")
-async def start_registration_callback(callback: CallbackQuery, callback_answer: CallbackAnswer):
+async def start_registration_callback(callback: CallbackQuery):
     try:
         user_id = callback.from_user.id
         logger.info(f"Starting registration for user {user_id}")
-        
-        # Устанавливаем начальное уведомление
-        callback_answer.text = "⏳ Начинаем регистрацию..."
-        callback_answer.show_alert = False
         
         # Создаем клавиатуру для ввода имени
         builder = InlineKeyboardBuilder()
@@ -189,15 +185,13 @@ async def start_registration_callback(callback: CallbackQuery, callback_answer: 
             "Нажмите кнопку ниже, чтобы начать ввод:",
             reply_markup=builder.as_markup()
         )
-        callback_answer.text = "✅ Начинаем регистрацию!"
-        callback_answer.show_alert = False
+        await callback.answer("✅ Начинаем регистрацию!")
     except Exception as e:
         logger.error(f"Error in start_registration_callback: {e}", exc_info=True)
-        callback_answer.text = "❌ Произошла ошибка. Пожалуйста, попробуйте позже."
-        callback_answer.show_alert = True
+        await callback.answer("❌ Произошла ошибка. Пожалуйста, попробуйте позже.", show_alert=True)
 
 @dp.callback_query(F.data == "input_name")
-async def input_name_callback(callback: CallbackQuery, callback_answer: CallbackAnswer):
+async def input_name_callback(callback: CallbackQuery):
     try:
         user_id = callback.from_user.id
         # Устанавливаем состояние для ввода имени
@@ -210,12 +204,10 @@ async def input_name_callback(callback: CallbackQuery, callback_answer: Callback
         await callback.message.edit_text(
             "Пожалуйста, введите ваше имя:"
         )
-        callback_answer.text = "✅ Готов к вводу имени"
-        callback_answer.show_alert = False
+        await callback.answer("✅ Готов к вводу имени")
     except Exception as e:
         logger.error(f"Error in input_name_callback: {e}", exc_info=True)
-        callback_answer.text = "❌ Произошла ошибка. Пожалуйста, попробуйте позже."
-        callback_answer.show_alert = True
+        await callback.answer("❌ Произошла ошибка. Пожалуйста, попробуйте позже.", show_alert=True)
 
 @dp.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 1)
 async def process_name(message: types.Message):
@@ -252,18 +244,16 @@ async def process_name(message: types.Message):
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.callback_query(F.data == "input_goal")
-async def input_goal_callback(callback: CallbackQuery, callback_answer: CallbackAnswer):
+async def input_goal_callback(callback: CallbackQuery):
     try:
         user_id = callback.from_user.id
         await callback.message.edit_text(
             "Пожалуйста, введите вашу цель:"
         )
-        callback_answer.text = "✅ Готов к вводу цели"
-        callback_answer.show_alert = False
+        await callback.answer("✅ Готов к вводу цели")
     except Exception as e:
         logger.error(f"Error in input_goal_callback: {e}", exc_info=True)
-        callback_answer.text = "❌ Произошла ошибка. Пожалуйста, попробуйте позже."
-        callback_answer.show_alert = True
+        await callback.answer("❌ Произошла ошибка. Пожалуйста, попробуйте позже.", show_alert=True)
 
 @dp.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 2)
 async def process_goal(message: types.Message):
@@ -666,7 +656,7 @@ async def cmd_stop(message: types.Message):
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.callback_query(F.data == "confirm_stop")
-async def confirm_stop_callback(callback: CallbackQuery, callback_answer: CallbackAnswer):
+async def confirm_stop_callback(callback: CallbackQuery):
     try:
         user_id = callback.from_user.id
         logger.info(f"User {user_id} confirmed profile deletion")
@@ -679,8 +669,7 @@ async def confirm_stop_callback(callback: CallbackQuery, callback_answer: Callba
             user = user.scalar_one_or_none()
             
             if not user:
-                callback_answer.text = "❌ Профиль не найден"
-                callback_answer.show_alert = True
+                await callback.answer("❌ Профиль не найден", show_alert=True)
                 return
             
             # Удаляем все выполнения пользователя
@@ -701,26 +690,22 @@ async def confirm_stop_callback(callback: CallbackQuery, callback_answer: Callba
                 "✅ Ваши данные успешно удалены.\n"
                 "Спасибо за участие! Если захотите вернуться, используйте команду /start"
             )
-            callback_answer.text = "✅ Ваши данные успешно удалены"
-            callback_answer.show_alert = True
+            await callback.answer("✅ Ваши данные успешно удалены", show_alert=True)
     except Exception as e:
         logger.error(f"Error in confirm_stop_callback: {e}", exc_info=True)
-        callback_answer.text = "❌ Произошла ошибка при удалении данных"
-        callback_answer.show_alert = True
+        await callback.answer("❌ Произошла ошибка при удалении данных", show_alert=True)
 
 @dp.callback_query(F.data == "cancel_stop")
-async def cancel_stop_callback(callback: CallbackQuery, callback_answer: CallbackAnswer):
+async def cancel_stop_callback(callback: CallbackQuery):
     try:
         await callback.message.edit_text(
             "❌ Удаление профиля отменено.\n"
             "Ваши данные сохранены."
         )
-        callback_answer.text = "✅ Удаление отменено"
-        callback_answer.show_alert = False
+        await callback.answer("✅ Удаление отменено")
     except Exception as e:
         logger.error(f"Error in cancel_stop_callback: {e}", exc_info=True)
-        callback_answer.text = "❌ Произошла ошибка. Пожалуйста, попробуйте позже."
-        callback_answer.show_alert = True
+        await callback.answer("❌ Произошла ошибка. Пожалуйста, попробуйте позже.", show_alert=True)
 
 async def get_switch_pm_button(bot_username: str) -> InlineKeyboardMarkup:
     """Создает кнопку для перехода в личные сообщения"""
@@ -1064,7 +1049,7 @@ async def cmd_complete(message: types.Message):
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @dp.callback_query(F.data.startswith("complete_"))
-async def complete_date_callback(callback: CallbackQuery, callback_answer: CallbackAnswer):
+async def complete_date_callback(callback: CallbackQuery):
     try:
         user_id = callback.from_user.id
         date_str = callback.data.split('_')[1]
@@ -1080,8 +1065,7 @@ async def complete_date_callback(callback: CallbackQuery, callback_answer: Callb
             user = user.scalar_one_or_none()
             
             if not user:
-                callback_answer.text = "❌ Вы не зарегистрированы. Используйте команду /start"
-                callback_answer.show_alert = True
+                await callback.answer("❌ Вы не зарегистрированы. Используйте команду /start", show_alert=True)
                 return
             
             # Проверяем, не отметил ли уже пользователь выполнение за эту дату
@@ -1095,8 +1079,7 @@ async def complete_date_callback(callback: CallbackQuery, callback_answer: Callb
             existing_completion = existing_completion.scalar_one_or_none()
             
             if existing_completion:
-                callback_answer.text = f"❌ Вы уже отметили выполнение цели за {formatted_date}"
-                callback_answer.show_alert = True
+                await callback.answer(f"❌ Вы уже отметили выполнение цели за {formatted_date}", show_alert=True)
                 return
             
             # Создаем новое выполнение
@@ -1129,12 +1112,10 @@ async def complete_date_callback(callback: CallbackQuery, callback_answer: Callb
                 f"Хотите отметить выполнение за другую дату?",
                 reply_markup=builder.as_markup()
             )
-            callback_answer.text = f"✅ Выполнение отмечено за {formatted_date}"
-            callback_answer.show_alert = False
+            await callback.answer(f"✅ Выполнение отмечено за {formatted_date}")
     except Exception as e:
         logger.error(f"Error in complete_date_callback: {e}", exc_info=True)
-        callback_answer.text = "❌ Произошла ошибка при отметке выполнения"
-        callback_answer.show_alert = True
+        await callback.answer("❌ Произошла ошибка при отметке выполнения", show_alert=True)
 
 async def on_startup(bot: Bot) -> None:
     logger.info("Starting bot...")
