@@ -1137,6 +1137,9 @@ async def main():
     # Регистрируем корневой endpoint
     app.router.add_get("/", handle_root)
     
+    # Включаем роутер в диспетчер
+    dp.include_router(router)
+    
     # Создаем обработчик вебхука
     webhook_handler = SimpleRequestHandler(
         dispatcher=dp,
