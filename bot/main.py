@@ -261,37 +261,25 @@ async def process_goal(message: types.Message):
         registration_states[user_id]["data"]["goal"] = goal
         registration_states[user_id]["step"] = 3
         
-        # Создаем клавиатуру с эмодзи
-        keyboard = InlineKeyboardMarkup(row_width=4)
-        emojis = ["🏃", "📚", "💪", "🧘", "🎯", "🌟", "⚡", "🔥"]
-        for emoji in emojis:
-            keyboard.add(
-                InlineKeyboardButton(
-                    text=emoji,
-                    callback_data=f"select_emoji_{emoji}"
-                )
-            )
-        
         await message.answer(
-            f"Отлично! Теперь выберите эмодзи, который будет отображаться рядом с вашим именем в статистике.\n"
-            "Нажмите на один из предложенных эмодзи:",
-            reply_markup=keyboard
+            f"Отлично! Теперь отправьте любой эмодзи, который будет отображаться рядом с вашим именем в статистике.\n"
+            "Например: 🏃, 📚, 💪, 🧘, 🎯 или любой другой эмодзи на ваш выбор"
         )
     except Exception as e:
         logger.error(f"Error in process_goal: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@router.callback_query(F.data.startswith('select_emoji_'))
-async def select_emoji_callback(callback: CallbackQuery):
+@router.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 3)
+async def process_emoji(message: types.Message):
     try:
-        await callback.answer()
-        user_id = callback.from_user.id
-        emoji = callback.data.split('_')[2]
+        user_id = message.from_user.id
+        emoji = message.text.strip()
         
-        if user_id not in registration_states:
-            await callback.message.edit_text("❌ Ошибка: сессия регистрации истекла. Пожалуйста, начните регистрацию заново.")
+        # Проверяем, что сообщение содержит только один эмодзи
+        if len(emoji) != 1 or not any(char in emoji for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
+            await message.answer("Пожалуйста, отправьте только один эмодзи. Попробуйте еще раз:")
             return
-            
+        
         registration_states[user_id]["data"]["emoji"] = emoji
         
         # Создаем клавиатуру для подтверждения
@@ -306,7 +294,7 @@ async def select_emoji_callback(callback: CallbackQuery):
         goal = data.get("goal", "")
         
         # Обновляем сообщение
-        await callback.message.edit_text(
+        await message.answer(
             f"Проверьте введенные данные:\n\n"
             f"👤 Имя: {name}\n"
             f"🎯 Цель: {goal}\n"
@@ -315,8 +303,8 @@ async def select_emoji_callback(callback: CallbackQuery):
             reply_markup=keyboard.as_markup()
         )
     except Exception as e:
-        logger.error(f"Error in select_emoji_callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+        logger.error(f"Error in process_emoji: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 @router.callback_query(F.data == "confirm_registration")
 async def confirm_registration_callback(callback: CallbackQuery):
@@ -451,15 +439,9 @@ async def update_field_callback(callback: CallbackQuery):
             update_states[user_id] = field
             
             if field == "emoji":
-                # Создаем клавиатуру с эмодзи
-                keyboard = InlineKeyboardBuilder()
-                emojis = ["😊", "😎", "🤔", "😴", "😍", "😎", "🤗", "😇", "😋", "😌"]
-                for emoji in emojis:
-                    keyboard.button(text=emoji, callback_data=f"select_update_emoji_{emoji}")
-                keyboard.adjust(5)
                 await callback.message.edit_text(
-                    "Выберите новый эмодзи:",
-                    reply_markup=keyboard.as_markup()
+                    "Отправьте любой эмодзи, который будет отображаться рядом с вашим именем в статистике.\n"
+                    "Например: 🏃, 📚, 💪, 🧘, 🎯 или любой другой эмодзи на ваш выбор"
                 )
             else:
                 field_names = {
@@ -477,11 +459,15 @@ async def update_field_callback(callback: CallbackQuery):
 async def process_field_update(message: types.Message):
     try:
         user_id = message.from_user.id
-        state = update_states[user_id]
-        field = state["field"]
+        field = update_states[user_id]
         value = message.text.strip()
         
-        if field in ["name", "goal"]:
+        if field == "emoji":
+            # Проверяем, что сообщение содержит только один эмодзи
+            if len(value) != 1 or not any(char in value for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
+                await message.answer("Пожалуйста, отправьте только один эмодзи. Попробуйте еще раз:")
+                return
+        elif field in ["name", "goal"]:
             min_length = 2 if field == "name" else 5
             if len(value) < min_length:
                 await message.answer(f"{'Имя' if field == 'name' else 'Цель'} должна содержать минимум {min_length} символа. Попробуйте еще раз:")
@@ -498,6 +484,8 @@ async def process_field_update(message: types.Message):
                 user.name = value
             elif field == "goal":
                 user.goal = value
+            elif field == "emoji":
+                user.emoji = value
             
             await session.commit()
             del update_states[user_id]
@@ -507,34 +495,6 @@ async def process_field_update(message: types.Message):
     except Exception as e:
         logger.error(f"Error in process_field_update: {e}", exc_info=True)
         await message.answer("Произошла ошибка при обновлении данных. Пожалуйста, попробуйте позже.")
-
-@router.callback_query(F.data.startswith('select_update_emoji_'))
-async def select_update_emoji_callback(callback: CallbackQuery):
-    try:
-        await callback.answer()
-        user_id = callback.from_user.id
-        emoji = callback.data.split('_')[3]
-        
-        if user_id not in update_states:
-            await callback.message.edit_text("❌ Ошибка: сессия обновления истекла")
-            return
-            
-        async with async_session() as session:
-            user = await session.get(User, user_id)
-            if not user:
-                await callback.message.edit_text("❌ Ошибка: пользователь не найден")
-                return
-                
-            user.emoji = emoji
-            await session.commit()
-            
-            # Очищаем состояние обновления
-            del update_states[user_id]
-            
-            await callback.message.edit_text(f"✅ Эмодзи успешно обновлен на {emoji}")
-    except Exception as e:
-        logger.error(f"Error in select_update_emoji_callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
 
 # Добавляем фильтр ChatTypeFilter к остальным командам профиля
 @router.message(Command("profile"), F.chat.type == ChatType.PRIVATE)
