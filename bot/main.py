@@ -33,6 +33,13 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=os.getenv("TOKEN"))
 dp = Dispatcher()
 router = Router()
+
+# Регистрация middleware
+dp.update.middleware(ThrottlingMiddleware())
+dp.update.middleware(LoggingMiddleware())
+dp.update.middleware(CallbackLoggingMiddleware())
+
+# Включаем роутер в диспетчер
 dp.include_router(router)
 
 # Настройка базы данных
@@ -87,11 +94,6 @@ class CallbackLoggingMiddleware(BaseMiddleware):
             logger.info(f"Callback processed in {duration:.2f} seconds")
             return result
         return await handler(event, data)
-
-# Регистрация middleware
-dp.update.middleware(ThrottlingMiddleware())
-dp.update.middleware(LoggingMiddleware())
-dp.update.middleware(CallbackLoggingMiddleware())
 
 @router.errors()
 async def error_handler(update: types.Update, exception: Exception):
@@ -1136,9 +1138,6 @@ async def main():
     
     # Регистрируем корневой endpoint
     app.router.add_get("/", handle_root)
-    
-    # Включаем роутер в диспетчер
-    dp.include_router(router)
     
     # Создаем обработчик вебхука
     webhook_handler = SimpleRequestHandler(
