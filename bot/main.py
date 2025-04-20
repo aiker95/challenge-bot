@@ -717,7 +717,47 @@ async def process_result_type(message: types.Message):
                     await message.answer("Нет зарегистрированных пользователей.")
                     return
                 
-                if message.text == "Все":
+                if message.text == "День":
+                    # Получаем вчерашнюю дату
+                    yesterday = datetime.now().date() - timedelta(days=1)
+                    
+                    # Формируем сообщение
+                    result_message = f"Итоги {yesterday.strftime('%d.%m.%Y')}\n\n"
+                    
+                    # Списки для выполненных и пропущенных
+                    completed = []
+                    missed = []
+                    
+                    for user in users:
+                        # Проверяем выполнение за вчера
+                        completion = await session.execute(
+                            select(Completion)
+                            .where(
+                                Completion.user_id == user.id,
+                                Completion.date == yesterday
+                            )
+                        )
+                        completion = completion.scalar_one_or_none()
+                        
+                        if completion:
+                            completed.append(f"{user.emoji} {user.name} ✅")
+                        else:
+                            missed.append(f"{user.emoji} {user.name} ❌")
+                    
+                    # Добавляем статистику выполненных
+                    result_message += f"Выполнили: {len(completed)}/{len(users)}\n"
+                    for user in completed:
+                        result_message += f"{user}\n"
+                    
+                    # Добавляем статистику пропущенных
+                    if missed:
+                        result_message += f"\nПропустили: {len(missed)}/{len(users)}\n"
+                        for user in missed:
+                            result_message += f"{user}\n"
+                    
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
+                
+                elif message.text == "Все":
                     # Получаем первую и последнюю дату выполнения
                     dates = await session.execute(
                         select(Completion.date)
@@ -747,31 +787,6 @@ async def process_result_type(message: types.Message):
                         
                         completed_days = len(completions)
                         result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
-                    
-                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
-                
-                elif message.text == "День":
-                    # Получаем вчерашнюю дату
-                    yesterday = datetime.now().date() - timedelta(days=1)
-                    
-                    # Формируем сообщение
-                    result_message = f"Результаты за {yesterday.strftime('%d.%m.%Y')}:\n\n"
-                    
-                    for user in users:
-                        # Проверяем выполнение за вчера
-                        completion = await session.execute(
-                            select(Completion)
-                            .where(
-                                Completion.user_id == user.id,
-                                Completion.date == yesterday
-                            )
-                        )
-                        completion = completion.scalar_one_or_none()
-                        
-                        if completion:
-                            result_message += f"{user.name} {user.emoji}: ✅\n"
-                        else:
-                            result_message += f"{user.name} {user.emoji}: ❌\n"
                     
                     await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
                 
