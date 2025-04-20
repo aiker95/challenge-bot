@@ -283,8 +283,7 @@ async def process_emoji(message: types.Message):
         # Создаем клавиатуру для подтверждения
         keyboard = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="✅ Подтвердить")],
-                [KeyboardButton(text="🔄 Начать заново")]
+                [KeyboardButton(text="✅ Подтвердить")]
             ],
             resize_keyboard=True,
             one_time_keyboard=True
@@ -301,7 +300,7 @@ async def process_emoji(message: types.Message):
             f"👤 Имя: {name}\n"
             f"🎯 Цель: {goal}\n"
             f"😊 Эмодзи: {emoji}\n\n"
-            f"Если все верно, нажмите 'Подтвердить'. Если хотите начать заново, нажмите 'Начать заново'.",
+            f"Если все верно, нажмите 'Подтвердить'.",
             reply_markup=keyboard
         )
     except Exception as e:
@@ -349,33 +348,6 @@ async def confirm_registration(message: types.Message):
         logger.error(f"Error in confirm_registration: {e}")
         await message.answer("Произошла ошибка", show_alert=True)
 
-@router.message(F.text == "🔄 Начать заново")
-async def restart_registration(message: types.Message):
-    try:
-        user_id = message.from_user.id
-        
-        # Очищаем состояние регистрации
-        if user_id in registration_states:
-            del registration_states[user_id]
-            
-        # Создаем клавиатуру для начала регистрации
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Начать регистрацию")]
-            ],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        
-        await message.answer(
-            "Регистрация сброшена. Нажмите кнопку ниже, чтобы начать заново.",
-            reply_markup=keyboard
-        )
-    except Exception as e:
-        logger.error(f"Error in restart_registration: {e}")
-        await message.answer("Произошла ошибка", show_alert=True)
-
-# Обновление профиля
 @router.message(Command("update"), F.chat.type == ChatType.PRIVATE)
 async def cmd_update(message: types.Message):
     if not await is_private_chat(message):
@@ -685,7 +657,21 @@ async def cmd_stop_group(message: types.Message):
 @router.message(Command("result"))
 async def cmd_result(message: types.Message):
     try:
-        logger.info(f"Received /result command from user {message.from_user.id}")
+        user_id = message.from_user.id
+        logger.info(f"Received /result command from user {user_id}")
+        
+        async with async_session() as session:
+            async with session.begin():
+                # Проверяем, зарегистрирован ли пользователь
+                result = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
+                    return
         
         # Создаем клавиатуру для выбора типа отчета
         keyboard = ReplyKeyboardMarkup(
