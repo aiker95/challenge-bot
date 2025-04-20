@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Message, BotCommand, BotCommandScopeDefault, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.enums import ChatType
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
@@ -609,13 +609,14 @@ async def confirm_stop_callback(callback: CallbackQuery):
         user_id = callback.from_user.id
         
         async with async_session() as session:
-            user = await session.get(User, user_id)
-            if user:
-                await session.delete(user)
-                await session.commit()
-                await callback.message.edit_text("✅ Ваши данные успешно удалены")
-            else:
-                await callback.message.edit_text("❌ Ошибка: пользователь не найден")
+            async with session.begin():
+                user = await session.get(User, user_id)
+                if user:
+                    await session.delete(user)
+                    await session.commit()
+                    await callback.message.edit_text("✅ Ваши данные успешно удалены")
+                else:
+                    await callback.message.edit_text("❌ Ошибка: пользователь не найден")
     except Exception as e:
         logger.error(f"Error in confirm_stop_callback: {e}")
         await callback.answer("❌ Произошла ошибка при удалении данных", show_alert=True)
@@ -944,101 +945,88 @@ async def cmd_complete(message: types.Message):
         logger.info(f"Received /complete command from user {user_id}")
         
         async with async_session() as session:
-            # Исправляем запрос для поиска пользователя по telegram_id
-            result = await session.execute(
-                select(User)
-                .where(User.telegram_id == user_id)
-            )
-            user = result.scalar_one_or_none()
-            
-            if not user:
-                await message.answer("Вы не зарегистрированы. Используйте команду /start")
-                return
-            
-            # Создаем клавиатуру с кнопками "Сегодня" и "Вчера"
-            keyboard = InlineKeyboardBuilder()
-            today = datetime.now().date()
-            yesterday = today - timedelta(days=1)
-            
-            keyboard.button(text="Сегодня", callback_data=f"complete_{today}")
-            keyboard.button(text="Вчера", callback_data=f"complete_{yesterday}")
-            keyboard.adjust(2)
-            
-            await message.answer(
-                "Выберите дату для отметки выполнения цели:",
-                reply_markup=keyboard.as_markup()
-            )
+            async with session.begin():
+                # Исправляем запрос для поиска пользователя по telegram_id
+                result = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    await message.answer("Вы не зарегистрированы. Используйте команду /start")
+                    return
+                
+                # Создаем клавиатуру с кнопками "Сегодня" и "Вчера"
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [
+                            KeyboardButton(text="Сегодня"),
+                            KeyboardButton(text="Вчера")
+                        ]
+                    ],
+                    resize_keyboard=True,
+                    one_time_keyboard=True
+                )
+                
+                await message.answer(
+                    "Выберите дату для отметки выполнения цели:",
+                    reply_markup=keyboard
+                )
     except Exception as e:
         logger.error(f"Error in cmd_complete: {e}")
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@router.callback_query(F.data.startswith("complete_"))
-async def complete_date_callback(callback: CallbackQuery):
+@router.message(F.text.in_(["Сегодня", "Вчера"]))
+async def process_complete_date(message: types.Message):
     try:
-        logger.info(f"Processing complete_date_callback with data: {callback.data}")
-        
-        user_id = callback.from_user.id
-        date_str = callback.data.split("_")[1]
-        date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        
-        logger.info(f"User {user_id} trying to complete goal for date {date}")
+        user_id = message.from_user.id
+        date = datetime.now().date() if message.text == "Сегодня" else datetime.now().date() - timedelta(days=1)
         
         async with async_session() as session:
-            # Исправляем запрос для поиска пользователя по telegram_id
-            result = await session.execute(
-                select(User)
-                .where(User.telegram_id == user_id)
-            )
-            user = result.scalar_one_or_none()
-            
-            if not user:
-                logger.warning(f"User {user_id} not found")
-                await callback.answer("Вы не зарегистрированы. Используйте команду /start", show_alert=True)
-                return
-            
-            # Проверяем, не существует ли уже выполнение на эту дату
-            result = await session.execute(
-                select(Completion)
-                .where(
-                    Completion.user_id == user.id,
-                    Completion.date == date
+            async with session.begin():
+                result = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
                 )
-            )
-            existing_completion = result.scalar_one_or_none()
-            
-            if existing_completion:
-                logger.info(f"User {user_id} already completed goal for {date}")
-                await callback.answer(f"Вы уже отметили выполнение на {date.strftime('%d.%m.%Y')}", show_alert=True)
-                return
-            
-            # Создаем новое выполнение
-            new_completion = Completion(
-                user_id=user.id,
-                date=date
-            )
-            session.add(new_completion)
-            await session.commit()
-            
-            logger.info(f"Created new completion for user {user_id} on {date}")
-            
-            # Обновляем сообщение с новыми кнопками
-            keyboard = InlineKeyboardBuilder()
-            today = datetime.now().date()
-            yesterday = today - timedelta(days=1)
-            
-            keyboard.button(text="Сегодня", callback_data=f"complete_{today}")
-            keyboard.button(text="Вчера", callback_data=f"complete_{yesterday}")
-            keyboard.adjust(2)
-            
-            await callback.message.edit_text(
-                f"✅ Вы отметили выполнение на {date.strftime('%d.%m.%Y')}!\n\n"
-                "Выберите следующую дату:",
-                reply_markup=keyboard.as_markup()
-            )
-            await callback.answer("✅ Выполнение отмечено!")
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    await message.answer("Вы не зарегистрированы. Используйте команду /start")
+                    return
+                
+                # Проверяем, не существует ли уже выполнение на эту дату
+                result = await session.execute(
+                    select(Completion)
+                    .where(
+                        Completion.user_id == user.id,
+                        Completion.date == date
+                    )
+                )
+                existing_completion = result.scalar_one_or_none()
+                
+                if existing_completion:
+                    await message.answer(
+                        f"Вы уже отметили выполнение на {date.strftime('%d.%m.%Y')}",
+                        reply_markup=ReplyKeyboardRemove()
+                    )
+                    return
+                
+                # Создаем новое выполнение
+                new_completion = Completion(
+                    user_id=user.id,
+                    date=date
+                )
+                session.add(new_completion)
+                await session.commit()
+                
+                await message.answer(
+                    f"✅ Вы отметили выполнение на {date.strftime('%d.%m.%Y')}!",
+                    reply_markup=ReplyKeyboardRemove()
+                )
     except Exception as e:
-        logger.error(f"Error in complete_date_callback: {e}", exc_info=True)
-        await callback.answer("Произошла ошибка", show_alert=True)
+        logger.error(f"Error in process_complete_date: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
 async def on_startup(bot: Bot) -> None:
     logger.info("Starting bot...")
