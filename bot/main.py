@@ -271,12 +271,63 @@ async def process_goal(message: types.Message):
         logger.error(f"Error in process_goal: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
+@router.message(F.text == "✅ Подтвердить")
+async def confirm_registration(message: types.Message):
+    try:
+        user_id = message.from_user.id
+        
+        if user_id not in registration_states:
+            await message.answer("❌ Ошибка: сессия регистрации истекла. Пожалуйста, начните регистрацию заново.")
+            return
+            
+        data = registration_states[user_id]["data"]
+        
+        async with async_session() as session:
+            async with session.begin():
+                # Проверяем, существует ли уже пользователь
+                result = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
+                )
+                existing_user = result.scalar_one_or_none()
+                
+                if existing_user:
+                    # Обновляем существующего пользователя
+                    existing_user.name = data["name"]
+                    existing_user.goal = data["goal"]
+                    existing_user.emoji = data["emoji"]
+                    await session.commit()
+                    await message.answer("✅ Ваш профиль успешно обновлен!", reply_markup=ReplyKeyboardRemove())
+                else:
+                    # Создаем нового пользователя
+                    new_user = User(
+                        telegram_id=user_id,
+                        name=data["name"],
+                        goal=data["goal"],
+                        emoji=data["emoji"]
+                    )
+                    session.add(new_user)
+                    await session.commit()
+                    await message.answer("✅ Регистрация успешно завершена!", reply_markup=ReplyKeyboardRemove())
+                
+                # Очищаем состояние регистрации
+                del registration_states[user_id]
+                
+    except Exception as e:
+        logger.error(f"Error in confirm_registration: {e}")
+        await message.answer("Произошла ошибка при завершении регистрации. Пожалуйста, попробуйте позже.")
+
 @router.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 3)
 async def process_emoji(message: types.Message):
     try:
         user_id = message.from_user.id
         emoji = message.text.strip()
         
+        # Проверяем, не является ли сообщение кнопкой подтверждения
+        if emoji == "✅ Подтвердить":
+            await confirm_registration(message)
+            return
+            
         # Принимаем любой введенный текст как эмодзи
         registration_states[user_id]["data"]["emoji"] = emoji
         
@@ -306,47 +357,6 @@ async def process_emoji(message: types.Message):
     except Exception as e:
         logger.error(f"Error in process_emoji: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
-
-@router.message(F.text == "✅ Подтвердить")
-async def confirm_registration(message: types.Message):
-    try:
-        user_id = message.from_user.id
-        
-        if user_id not in registration_states:
-            await message.answer("❌ Ошибка: сессия регистрации истекла. Пожалуйста, начните регистрацию заново.")
-            return
-            
-        data = registration_states[user_id]["data"]
-        
-        async with async_session() as session:
-            async with session.begin():
-                # Проверяем, существует ли уже пользователь
-                existing_user = await session.get(User, user_id)
-                if existing_user:
-                    # Обновляем существующего пользователя
-                    existing_user.name = data["name"]
-                    existing_user.goal = data["goal"]
-                    existing_user.emoji = data["emoji"]
-                    await session.commit()
-                    await message.answer("✅ Ваш профиль успешно обновлен!", reply_markup=ReplyKeyboardRemove())
-                else:
-                    # Создаем нового пользователя
-                    new_user = User(
-                        id=user_id,
-                        name=data["name"],
-                        goal=data["goal"],
-                        emoji=data["emoji"]
-                    )
-                    session.add(new_user)
-                    await session.commit()
-                    await message.answer("✅ Регистрация успешно завершена!", reply_markup=ReplyKeyboardRemove())
-                
-                # Очищаем состояние регистрации
-                del registration_states[user_id]
-                
-    except Exception as e:
-        logger.error(f"Error in confirm_registration: {e}")
-        await message.answer("Произошла ошибка", show_alert=True)
 
 @router.message(Command("update"), F.chat.type == ChatType.PRIVATE)
 async def cmd_update(message: types.Message):
