@@ -706,8 +706,7 @@ async def cmd_result(message: types.Message):
                 [KeyboardButton(text="По шагам")]
             ],
             resize_keyboard=True,
-            one_time_keyboard=True,
-            selective=True  # Делаем клавиатуру видимой только для вызвавшего команду
+            one_time_keyboard=True
         )
         
         await message.answer(
@@ -718,12 +717,9 @@ async def cmd_result(message: types.Message):
         logger.error(f"Error in cmd_result: {e}", exc_info=True)
         await message.answer("Произошла ошибка при получении результатов.")
 
-@router.callback_query(F.data.startswith("result_"))
-async def process_result_type(callback: types.CallbackQuery):
+@router.message(F.text.in_(["Все", "День", "Месяц", "Год", "По шагам"]))
+async def process_result_type(message: types.Message):
     try:
-        result_type = callback.data.split("_")[1]
-        user_id = callback.from_user.id
-        
         async with async_session() as session:
             async with session.begin():
                 # Получаем всех пользователей
@@ -731,10 +727,10 @@ async def process_result_type(callback: types.CallbackQuery):
                 users = users.scalars().all()
                 
                 if not users:
-                    await callback.message.answer("Нет зарегистрированных пользователей.")
+                    await message.answer("Нет зарегистрированных пользователей.")
                     return
                 
-                if result_type == "day":
+                if message.text == "День":
                     # Получаем вчерашнюю дату
                     yesterday = datetime.now().date() - timedelta(days=1)
                     
@@ -772,9 +768,9 @@ async def process_result_type(callback: types.CallbackQuery):
                         for user in missed:
                             result_message += f"{user}\n"
                     
-                    await callback.message.answer(result_message)
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
                 
-                elif result_type == "all":
+                elif message.text == "Все":
                     # Получаем первую и последнюю дату выполнения
                     dates = await session.execute(
                         select(Completion.date)
@@ -783,7 +779,7 @@ async def process_result_type(callback: types.CallbackQuery):
                     dates = dates.scalars().all()
                     
                     if not dates:
-                        await callback.message.answer("Пока нет выполненных целей.")
+                        await message.answer("Пока нет выполненных целей.")
                         return
                     
                     first_date = dates[0]
@@ -805,9 +801,9 @@ async def process_result_type(callback: types.CallbackQuery):
                         completed_days = len(completions)
                         result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
                     
-                    await callback.message.answer(result_message)
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
                 
-                elif result_type == "month":
+                elif message.text == "Месяц":
                     # Получаем текущий месяц
                     today = datetime.now().date()
                     first_day = today.replace(day=1)
@@ -836,9 +832,9 @@ async def process_result_type(callback: types.CallbackQuery):
                         total_days = (last_day - first_day).days + 1
                         result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
                     
-                    await callback.message.answer(result_message)
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
                 
-                elif result_type == "year":
+                elif message.text == "Год":
                     # Получаем текущий год
                     today = datetime.now().date()
                     first_day = today.replace(month=1, day=1)
@@ -864,9 +860,9 @@ async def process_result_type(callback: types.CallbackQuery):
                         total_days = (last_day - first_day).days + 1
                         result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
                     
-                    await callback.message.answer(result_message)
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
                 
-                elif result_type == "steps":
+                elif message.text == "По шагам":
                     # Получаем все даты выполнения
                     dates = await session.execute(
                         select(Completion.date)
@@ -876,7 +872,7 @@ async def process_result_type(callback: types.CallbackQuery):
                     dates = dates.scalars().all()
                     
                     if not dates:
-                        await callback.message.answer("Пока нет выполненных целей.")
+                        await message.answer("Пока нет выполненных целей.")
                         return
                     
                     # Формируем сообщение
@@ -899,13 +895,11 @@ async def process_result_type(callback: types.CallbackQuery):
                                 result_message += f"{user.name} {user.emoji}\n"
                         result_message += "\n"
                     
-                    await callback.message.answer(result_message)
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
                 
-        await callback.answer()
     except Exception as e:
         logger.error(f"Error in process_result_type: {e}", exc_info=True)
-        await callback.message.answer("Произошла ошибка при получении результатов.")
-        await callback.answer()
+        await message.answer("Произошла ошибка при получении результатов.")
 
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
@@ -1004,8 +998,7 @@ async def cmd_complete(message: types.Message):
                         ]
                     ],
                     resize_keyboard=True,
-                    one_time_keyboard=True,
-                    selective=True  # Делаем клавиатуру видимой только для вызвавшего команду
+                    one_time_keyboard=True
                 )
                 
                 await message.answer(
