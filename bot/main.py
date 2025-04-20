@@ -373,11 +373,12 @@ async def cmd_update(message: types.Message):
         
         async with async_session() as session:
             async with session.begin():
-                user = await session.execute(
+                # Проверяем, зарегистрирован ли пользователь
+                result = await session.execute(
                     select(User)
                     .where(User.telegram_id == user_id)
                 )
-                user = user.scalar_one_or_none()
+                user = result.scalar_one_or_none()
                 
                 if not user:
                     await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
@@ -410,9 +411,15 @@ async def update_field(message: types.Message):
         
         async with async_session() as session:
             async with session.begin():
-                user = await session.get(User, user_id)
+                # Исправляем поиск пользователя по telegram_id
+                result = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                
                 if not user:
-                    await message.answer("❌ Ошибка: пользователь не найден")
+                    await message.answer("❌ Ошибка: пользователь не найден. Используйте команду /start для регистрации.")
                     return
                     
                 update_states[user_id] = field
@@ -436,7 +443,7 @@ async def update_field(message: types.Message):
         logger.error(f"Error in update_field: {e}")
         await message.answer("Произошла ошибка", show_alert=True)
 
-@router.message(lambda message: message.from_user.id in update_states and update_states[message.from_user.id] == "эмодзи")
+@router.message(lambda message: message.from_user.id in update_states)
 async def process_field_update(message: types.Message):
     try:
         user_id = message.from_user.id
@@ -451,11 +458,16 @@ async def process_field_update(message: types.Message):
         
         async with async_session() as session:
             async with session.begin():
-                user = await session.execute(
+                # Исправляем поиск пользователя по telegram_id
+                result = await session.execute(
                     select(User)
                     .where(User.telegram_id == user_id)
                 )
-                user = user.scalar_one_or_none()
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    await message.answer("❌ Ошибка: пользователь не найден. Используйте команду /start для регистрации.")
+                    return
                 
                 if field == "имя":
                     user.name = value
@@ -486,48 +498,49 @@ async def cmd_profile(message: types.Message):
         logger.info(f"Received /profile command from user {user_id}")
         
         async with async_session() as session:
-            # Получаем пользователя
-            user = await session.execute(
-                select(User)
-                .where(User.telegram_id == user_id)
-            )
-            user = user.scalar_one_or_none()
+            async with session.begin():
+                # Проверяем, зарегистрирован ли пользователь
+                result = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
+                    return
             
-            if not user:
-                await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
-                return
-            
-            # Получаем статистику выполнения
-            completions = await session.execute(
-                select(Completion)
-                .where(Completion.user_id == user.id)
-                .order_by(Completion.date)
-            )
-            completions = completions.scalars().all()
-            
-            # Получаем первую и последнюю дату выполнения
-            dates = await session.execute(
-                select(Completion.date)
-                .order_by(Completion.date)
-            )
-            dates = dates.scalars().all()
-            
-            total_days = 0
-            if dates:
-                first_date = dates[0]
-                last_date = dates[-1]
-                total_days = (last_date - first_date).days + 1
-            
-            profile_message = (
-                f"👤 Ваш профиль:\n\n"
-                f"Имя: {user.name}\n"
-                f"Цель: {user.goal}\n"
-                f"Эмодзи: {user.emoji}\n"
-                f"Выполнено дней: {len(completions)}/{total_days if total_days > 0 else '?'}\n"
-                f"Дата регистрации: {user.created_at.strftime('%d.%m.%Y')}"
-            )
-            
-            await message.answer(profile_message)
+                # Получаем статистику выполнения
+                completions = await session.execute(
+                    select(Completion)
+                    .where(Completion.user_id == user.id)
+                    .order_by(Completion.date)
+                )
+                completions = completions.scalars().all()
+                
+                # Получаем первую и последнюю дату выполнения
+                dates = await session.execute(
+                    select(Completion.date)
+                    .order_by(Completion.date)
+                )
+                dates = dates.scalars().all()
+                
+                total_days = 0
+                if dates:
+                    first_date = dates[0]
+                    last_date = dates[-1]
+                    total_days = (last_date - first_date).days + 1
+                
+                profile_message = (
+                    f"👤 Ваш профиль:\n\n"
+                    f"Имя: {user.name}\n"
+                    f"Цель: {user.goal}\n"
+                    f"Эмодзи: {user.emoji}\n"
+                    f"Выполнено дней: {len(completions)}/{total_days if total_days > 0 else '?'}\n"
+                    f"Дата регистрации: {user.created_at.strftime('%d.%m.%Y')}"
+                )
+                
+                await message.answer(profile_message)
     except Exception as e:
         logger.error(f"Error in cmd_profile: {e}", exc_info=True)
         await message.answer("Произошла ошибка при получении профиля.")
@@ -893,7 +906,7 @@ async def cmd_help(message: types.Message):
     help_text = """
 🤖 Доступные команды:
 
-📱 В личных сообщениях:
+📱 В личных сообщениях (требуется регистрация):
 /start - Начать регистрацию
 /profile - Показать свой профиль
 /update - Обновить данные профиля
@@ -901,9 +914,9 @@ async def cmd_help(message: types.Message):
 
 👥 В любом чате:
 /complete - Отметить выполнение цели
-/result - Показать результаты (только для зарегистрированных)
+/result - Показать результаты (требуется регистрация)
 
-❓ Дополнительно:
+❓ Дополнительно (доступно всем):
 /help - Показать эту справку
 /info - Подробная инструкция
 
@@ -922,11 +935,12 @@ async def cmd_info(message: types.Message):
 • Укажите свою цель (например: "Бегать каждый день")
 • Выберите эмодзи для отображения в статистике
 
-2️⃣ Основные команды:
+2️⃣ Основные команды (требуется регистрация):
 • /complete - Отметить выполнение цели (кнопки "Сегодня" или "Вчера")
 • /profile - Посмотреть свой профиль (только в личных сообщениях)
 • /update - Изменить данные профиля (только в личных сообщениях)
 • /stop - Удалить свой профиль и все данные (только в личных сообщениях)
+• /result - Показать результаты с выбором типа отчета
 
 3️⃣ Просмотр результатов:
 • /result - Показать результаты с выбором типа отчета:
@@ -936,7 +950,7 @@ async def cmd_info(message: types.Message):
   - Год: результаты за текущий год
   - По шагам: детальная статистика по дням
 
-4️⃣ Дополнительно:
+4️⃣ Дополнительно (доступно всем):
 • /help - Краткая справка по командам
 • /info - Показать эту инструкцию
 
