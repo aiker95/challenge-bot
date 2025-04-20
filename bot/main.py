@@ -93,16 +93,6 @@ dp.update.middleware(ThrottlingMiddleware())
 dp.update.middleware(LoggingMiddleware())
 dp.update.middleware(CallbackLoggingMiddleware())
 
-# Добавляем обработчик для всех callback-запросов
-@router.callback_query()
-async def handle_callback_query(callback: CallbackQuery):
-    try:
-        logger.info(f"Received callback query: {callback.data}")
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"Error in handle_callback_query: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
-
 @router.errors()
 async def error_handler(update: types.Update, exception: Exception):
     logger.error(f"Update {update} caused error {exception}")
@@ -1024,7 +1014,6 @@ async def cmd_complete(message: types.Message):
 async def complete_date_callback(callback: CallbackQuery):
     try:
         logger.info(f"Processing complete_date_callback with data: {callback.data}")
-        await callback.answer()
         
         user_id = callback.from_user.id
         date_str = callback.data.split("_")[1]
@@ -1042,7 +1031,7 @@ async def complete_date_callback(callback: CallbackQuery):
             
             if not user:
                 logger.warning(f"User {user_id} not found")
-                await callback.message.edit_text("Вы не зарегистрированы. Используйте команду /start")
+                await callback.answer("Вы не зарегистрированы. Используйте команду /start", show_alert=True)
                 return
             
             # Проверяем, не существует ли уже выполнение на эту дату
@@ -1057,7 +1046,7 @@ async def complete_date_callback(callback: CallbackQuery):
             
             if existing_completion:
                 logger.info(f"User {user_id} already completed goal for {date}")
-                await callback.message.edit_text(f"Вы уже отметили выполнение на {date.strftime('%d.%m.%Y')}")
+                await callback.answer(f"Вы уже отметили выполнение на {date.strftime('%d.%m.%Y')}", show_alert=True)
                 return
             
             # Создаем новое выполнение
@@ -1084,6 +1073,7 @@ async def complete_date_callback(callback: CallbackQuery):
                 "Выберите следующую дату:",
                 reply_markup=keyboard.as_markup()
             )
+            await callback.answer("✅ Выполнение отмечено!")
     except Exception as e:
         logger.error(f"Error in complete_date_callback: {e}", exc_info=True)
         await callback.answer("Произошла ошибка", show_alert=True)
