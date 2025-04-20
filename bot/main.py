@@ -34,6 +34,7 @@ class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, limit=1):
         self.limit = limit
         self.last_time = {}
+        self.retry_count = {}
         super().__init__()
 
     async def __call__(self, handler, event, data):
@@ -43,11 +44,30 @@ class ThrottlingMiddleware(BaseMiddleware):
         user_id = event.from_user.id
         current_time = datetime.now().timestamp()
         
+        # Проверяем количество попыток
+        if user_id not in self.retry_count:
+            self.retry_count[user_id] = 0
+        
+        # Если сервис перезапускается, даем больше времени на ответ
+        if self.retry_count[user_id] > 0:
+            self.limit = 5  # Увеличиваем лимит времени при повторных попытках
+        
         if user_id in self.last_time:
             if current_time - self.last_time[user_id] < self.limit:
-                logger.warning(f"User {user_id} is being throttled")
-                return
+                self.retry_count[user_id] += 1
+                if self.retry_count[user_id] <= 3:  # Максимум 3 попытки
+                    await event.answer(
+                        "⏳ Сервис перезапускается. Пожалуйста, подождите несколько секунд и попробуйте снова."
+                    )
+                    return
+                else:
+                    await event.answer(
+                        "❌ Сервис временно недоступен. Пожалуйста, попробуйте позже."
+                    )
+                    return
+        
         self.last_time[user_id] = current_time
+        self.retry_count[user_id] = 0  # Сбрасываем счетчик при успешном запросе
         return await handler(event, data)
 
 class LoggingMiddleware(BaseMiddleware):
@@ -97,8 +117,21 @@ update_states = {}
 @router.errors()
 async def error_handler(update: types.Update, exception: Exception):
     logger.error(f"Update {update} caused error {exception}")
+    
+    # Если это ошибка перезапуска сервиса
+    if isinstance(exception, (ConnectionError, TimeoutError)):
+        if update.message:
+            await update.message.answer(
+                "⏳ Сервис перезапускается. Пожалуйста, подождите несколько секунд и попробуйте снова."
+            )
+        return True
+    
     if isinstance(exception, TelegramAPIError):
         logger.error(f"Telegram API error: {exception}")
+        if update.message:
+            await update.message.answer(
+                "❌ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже."
+            )
     return True
 
 # Проверка на личный чат
