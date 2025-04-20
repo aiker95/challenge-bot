@@ -277,9 +277,9 @@ async def process_emoji(message: types.Message):
         user_id = message.from_user.id
         emoji = message.text.strip()
         
-        # Проверяем, что сообщение содержит только один эмодзи
-        if len(emoji) != 1 or not any(char in emoji for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
-            await message.answer("Пожалуйста, отправьте только один эмодзи. Попробуйте еще раз:")
+        # Проверяем, что сообщение содержит только эмодзи
+        if not any(char in emoji for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
+            await message.answer("Пожалуйста, отправьте эмодзи. Попробуйте еще раз:")
             return
         
         registration_states[user_id]["data"]["emoji"] = emoji
@@ -458,7 +458,7 @@ async def update_field(message: types.Message):
         logger.error(f"Error in update_field: {e}")
         await message.answer("Произошла ошибка", show_alert=True)
 
-@router.message(lambda message: message.from_user.id in update_states)
+@router.message(lambda message: message.from_user.id in update_states and update_states[message.from_user.id] == "эмодзи")
 async def process_field_update(message: types.Message):
     try:
         user_id = message.from_user.id
@@ -466,9 +466,9 @@ async def process_field_update(message: types.Message):
         value = message.text.strip()
         
         if field == "эмодзи":
-            # Проверяем, что сообщение содержит только один эмодзи
-            if len(value) != 1 or not any(char in value for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
-                await message.answer("Пожалуйста, отправьте только один эмодзи. Попробуйте еще раз:")
+            # Проверяем, что сообщение содержит эмодзи
+            if not any(char in value for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
+                await message.answer("Пожалуйста, отправьте эмодзи. Попробуйте еще раз:")
                 return
         elif field in ["имя", "цель"]:
             min_length = 2 if field == "имя" else 5
@@ -696,188 +696,195 @@ async def cmd_result(message: types.Message):
     try:
         logger.info(f"Received /result command from user {message.from_user.id}")
         
-        async with async_session() as session:
-            # Получаем всех пользователей
-            users = await session.execute(select(User))
-            users = users.scalars().all()
-            
-            if not users:
-                await message.answer("Нет зарегистрированных пользователей.")
-                return
-            
-            # Получаем первую и последнюю дату выполнения
-            dates = await session.execute(
-                select(Completion.date)
-                .order_by(Completion.date)
-            )
-            dates = dates.scalars().all()
-            
-            if not dates:
-                await message.answer("Пока нет выполненных целей.")
-                return
-            
-            first_date = dates[0]
-            last_date = dates[-1]
-            total_days = (last_date - first_date).days + 1
-            
-            # Формируем сообщение для каждого пользователя
-            result_message = "Результаты всех пользователей:\n\n"
-            
-            for user in users:
-                # Получаем все выполнения для пользователя
-                completions = await session.execute(
-                    select(Completion)
-                    .where(Completion.user_id == user.id)
-                    .order_by(Completion.date)
-                )
-                completions = completions.scalars().all()
-                
-                completed_days = len(completions)
-                result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
-            
-            await message.answer(result_message)
+        # Создаем клавиатуру для выбора типа отчета
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Все")],
+                [KeyboardButton(text="День")],
+                [KeyboardButton(text="Месяц")],
+                [KeyboardButton(text="Год")],
+                [KeyboardButton(text="По шагам")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        
+        await message.answer(
+            "Выберите тип отчета:",
+            reply_markup=keyboard
+        )
     except Exception as e:
         logger.error(f"Error in cmd_result: {e}", exc_info=True)
         await message.answer("Произошла ошибка при получении результатов.")
 
-@router.message(Command("result_day"))
-async def cmd_result_day(message: types.Message):
+@router.message(F.text.in_(["Все", "День", "Месяц", "Год", "По шагам"]))
+async def process_result_type(message: types.Message):
     try:
-        logger.info(f"Received /result_day command from user {message.from_user.id}")
-        
         async with async_session() as session:
-            # Получаем всех пользователей
-            users = await session.execute(select(User))
-            users = users.scalars().all()
-            
-            if not users:
-                await message.answer("Нет зарегистрированных пользователей.")
-                return
-            
-            # Получаем вчерашнюю дату
-            yesterday = datetime.now().date() - timedelta(days=1)
-            
-            # Формируем сообщение
-            result_message = f"Результаты за {yesterday.strftime('%d.%m.%Y')}:\n\n"
-            
-            for user in users:
-                # Проверяем выполнение за вчера
-                completion = await session.execute(
-                    select(Completion)
-                    .where(
-                        Completion.user_id == user.id,
-                        Completion.date == yesterday
-                    )
-                )
-                completion = completion.scalar_one_or_none()
+            async with session.begin():
+                # Получаем всех пользователей
+                users = await session.execute(select(User))
+                users = users.scalars().all()
                 
-                if completion:
-                    result_message += f"{user.name} {user.emoji}: ✅\n"
-                else:
-                    result_message += f"{user.name} {user.emoji}: ❌\n"
-            
-            await message.answer(result_message)
-    except Exception as e:
-        logger.error(f"Error in cmd_result_day: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при получении результатов за вчерашний день.")
-
-@router.message(Command("result_month"))
-async def cmd_result_month(message: types.Message):
-    try:
-        logger.info(f"Received /result_month command from user {message.from_user.id}")
-        
-        async with async_session() as session:
-            # Получаем всех пользователей
-            users = await session.execute(select(User))
-            users = users.scalars().all()
-            
-            if not users:
-                await message.answer("Нет зарегистрированных пользователей.")
-                return
-            
-            # Получаем текущий месяц
-            today = datetime.now().date()
-            first_day = today.replace(day=1)
-            if today.month == 12:
-                last_day = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
-            else:
-                last_day = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
-            
-            # Формируем сообщение
-            result_message = f"Результаты за {today.strftime('%B %Y')}:\n\n"
-            
-            for user in users:
-                # Получаем выполнения за текущий месяц
-                completions = await session.execute(
-                    select(Completion)
-                    .where(
-                        Completion.user_id == user.id,
-                        Completion.date >= first_day,
-                        Completion.date <= last_day
-                    )
-                    .order_by(Completion.date)
-                )
-                completions = completions.scalars().all()
+                if not users:
+                    await message.answer("Нет зарегистрированных пользователей.")
+                    return
                 
-                completed_days = len(completions)
-                total_days = (last_day - first_day).days + 1
-                result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
-            
-            await message.answer(result_message)
-    except Exception as e:
-        logger.error(f"Error in cmd_result_month: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при получении месячных результатов.")
-
-@router.message(Command("result_step"))
-async def cmd_result_step(message: types.Message):
-    try:
-        logger.info(f"Received /result_step command from user {message.from_user.id}")
-        
-        async with async_session() as session:
-            # Получаем всех пользователей
-            users = await session.execute(select(User))
-            users = users.scalars().all()
-            
-            if not users:
-                await message.answer("Нет зарегистрированных пользователей.")
-                return
-            
-            # Получаем все даты выполнения
-            dates = await session.execute(
-                select(Completion.date)
-                .distinct()
-                .order_by(Completion.date)
-            )
-            dates = dates.scalars().all()
-            
-            if not dates:
-                await message.answer("Пока нет выполненных целей.")
-                return
-            
-            # Формируем сообщение
-            result_message = "Результаты по шагам:\n\n"
-            
-            for date in dates:
-                result_message += f"{date.strftime('%d.%m.%Y')}:\n"
-                for user in users:
-                    # Проверяем выполнение для каждого пользователя
-                    completion = await session.execute(
-                        select(Completion)
-                        .where(
-                            Completion.user_id == user.id,
-                            Completion.date == date
-                        )
+                if message.text == "Все":
+                    # Получаем первую и последнюю дату выполнения
+                    dates = await session.execute(
+                        select(Completion.date)
+                        .order_by(Completion.date)
                     )
-                    completion = completion.scalar_one_or_none()
+                    dates = dates.scalars().all()
                     
-                    if completion:
-                        result_message += f"{user.name} {user.emoji}\n"
-                result_message += "\n"
-            
-            await message.answer(result_message)
+                    if not dates:
+                        await message.answer("Пока нет выполненных целей.")
+                        return
+                    
+                    first_date = dates[0]
+                    last_date = dates[-1]
+                    total_days = (last_date - first_date).days + 1
+                    
+                    # Формируем сообщение для каждого пользователя
+                    result_message = "Результаты всех пользователей:\n\n"
+                    
+                    for user in users:
+                        # Получаем все выполнения для пользователя
+                        completions = await session.execute(
+                            select(Completion)
+                            .where(Completion.user_id == user.id)
+                            .order_by(Completion.date)
+                        )
+                        completions = completions.scalars().all()
+                        
+                        completed_days = len(completions)
+                        result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
+                    
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
+                
+                elif message.text == "День":
+                    # Получаем вчерашнюю дату
+                    yesterday = datetime.now().date() - timedelta(days=1)
+                    
+                    # Формируем сообщение
+                    result_message = f"Результаты за {yesterday.strftime('%d.%m.%Y')}:\n\n"
+                    
+                    for user in users:
+                        # Проверяем выполнение за вчера
+                        completion = await session.execute(
+                            select(Completion)
+                            .where(
+                                Completion.user_id == user.id,
+                                Completion.date == yesterday
+                            )
+                        )
+                        completion = completion.scalar_one_or_none()
+                        
+                        if completion:
+                            result_message += f"{user.name} {user.emoji}: ✅\n"
+                        else:
+                            result_message += f"{user.name} {user.emoji}: ❌\n"
+                    
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
+                
+                elif message.text == "Месяц":
+                    # Получаем текущий месяц
+                    today = datetime.now().date()
+                    first_day = today.replace(day=1)
+                    if today.month == 12:
+                        last_day = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
+                    else:
+                        last_day = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
+                    
+                    # Формируем сообщение
+                    result_message = f"Результаты за {today.strftime('%B %Y')}:\n\n"
+                    
+                    for user in users:
+                        # Получаем выполнения за текущий месяц
+                        completions = await session.execute(
+                            select(Completion)
+                            .where(
+                                Completion.user_id == user.id,
+                                Completion.date >= first_day,
+                                Completion.date <= last_day
+                            )
+                            .order_by(Completion.date)
+                        )
+                        completions = completions.scalars().all()
+                        
+                        completed_days = len(completions)
+                        total_days = (last_day - first_day).days + 1
+                        result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
+                    
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
+                
+                elif message.text == "Год":
+                    # Получаем текущий год
+                    today = datetime.now().date()
+                    first_day = today.replace(month=1, day=1)
+                    last_day = today.replace(month=12, day=31)
+                    
+                    # Формируем сообщение
+                    result_message = f"Результаты за {today.year} год:\n\n"
+                    
+                    for user in users:
+                        # Получаем выполнения за текущий год
+                        completions = await session.execute(
+                            select(Completion)
+                            .where(
+                                Completion.user_id == user.id,
+                                Completion.date >= first_day,
+                                Completion.date <= last_day
+                            )
+                            .order_by(Completion.date)
+                        )
+                        completions = completions.scalars().all()
+                        
+                        completed_days = len(completions)
+                        total_days = (last_day - first_day).days + 1
+                        result_message += f"{user.name} {user.emoji}: {completed_days}/{total_days}\n\n"
+                    
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
+                
+                elif message.text == "По шагам":
+                    # Получаем все даты выполнения
+                    dates = await session.execute(
+                        select(Completion.date)
+                        .distinct()
+                        .order_by(Completion.date)
+                    )
+                    dates = dates.scalars().all()
+                    
+                    if not dates:
+                        await message.answer("Пока нет выполненных целей.")
+                        return
+                    
+                    # Формируем сообщение
+                    result_message = "Результаты по шагам:\n\n"
+                    
+                    for date in dates:
+                        result_message += f"{date.strftime('%d.%m.%Y')}:\n"
+                        for user in users:
+                            # Проверяем выполнение для каждого пользователя
+                            completion = await session.execute(
+                                select(Completion)
+                                .where(
+                                    Completion.user_id == user.id,
+                                    Completion.date == date
+                                )
+                            )
+                            completion = completion.scalar_one_or_none()
+                            
+                            if completion:
+                                result_message += f"{user.name} {user.emoji}\n"
+                        result_message += "\n"
+                    
+                    await message.answer(result_message, reply_markup=ReplyKeyboardRemove())
+                
     except Exception as e:
-        logger.error(f"Error in cmd_result_step: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при получении результатов по шагам.")
+        logger.error(f"Error in process_result_type: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении результатов.")
 
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
