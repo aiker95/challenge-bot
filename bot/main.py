@@ -277,11 +277,7 @@ async def process_emoji(message: types.Message):
         user_id = message.from_user.id
         emoji = message.text.strip()
         
-        # Проверяем, что сообщение содержит только эмодзи
-        if not any(char in emoji for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
-            await message.answer("Пожалуйста, отправьте эмодзи. Попробуйте еще раз:")
-            return
-        
+        # Принимаем любой введенный текст как эмодзи
         registration_states[user_id]["data"]["emoji"] = emoji
         
         # Создаем клавиатуру для подтверждения
@@ -465,12 +461,7 @@ async def process_field_update(message: types.Message):
         field = update_states[user_id]
         value = message.text.strip()
         
-        if field == "эмодзи":
-            # Проверяем, что сообщение содержит эмодзи
-            if not any(char in value for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
-                await message.answer("Пожалуйста, отправьте эмодзи. Попробуйте еще раз:")
-                return
-        elif field in ["имя", "цель"]:
+        if field in ["имя", "цель"]:
             min_length = 2 if field == "имя" else 5
             if len(value) < min_length:
                 await message.answer(f"{'Имя' if field == 'имя' else 'Цель'} должна содержать минимум {min_length} символа. Попробуйте еще раз:")
