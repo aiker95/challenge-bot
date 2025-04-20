@@ -127,77 +127,78 @@ async def cmd_start(message: types.Message):
         async with registration_locks[user_id]:
             logger.info(f"Lock acquired for user {user_id}")
             async with async_session() as session:
-                result = await session.execute(
-                    User.__table__.select().where(User.telegram_id == user_id)
-                )
-                user = result.first()
-                
-                if not user:
-                    registration_states[user_id] = {
-                        "step": 1,
-                        "data": {},
-                        "lock": asyncio.Lock()
-                    }
-                    logger.info(f"Starting registration for user {user_id}")
+                async with session.begin():
+                    result = await session.execute(
+                        User.__table__.select().where(User.telegram_id == user_id)
+                    )
+                    user = result.first()
                     
-                    # Создаем клавиатуру для начала регистрации
-                    keyboard = InlineKeyboardMarkup(row_width=1)
-                    keyboard.add(
-                        InlineKeyboardButton(
-                            text="Начать регистрацию",
-                            callback_data="start_registration"
+                    if not user:
+                        registration_states[user_id] = {
+                            "step": 1,
+                            "data": {},
+                            "lock": asyncio.Lock()
+                        }
+                        logger.info(f"Starting registration for user {user_id}")
+                        
+                        # Создаем клавиатуру для начала регистрации
+                        keyboard = ReplyKeyboardMarkup(
+                            keyboard=[
+                                [KeyboardButton(text="Начать регистрацию")]
+                            ],
+                            resize_keyboard=True,
+                            one_time_keyboard=True
                         )
-                    )
-                    
-                    await message.answer(
-                        "Добро пожаловать! Давайте зарегистрируем вас в системе.\n"
-                        "Нажмите кнопку ниже, чтобы начать:",
-                        reply_markup=keyboard
-                    )
-                else:
-                    logger.info(f"User {user_id} already registered")
-                    await message.answer("Вы уже зарегистрированы!")
+                        
+                        await message.answer(
+                            "Добро пожаловать! Давайте зарегистрируем вас в системе.\n"
+                            "Нажмите кнопку ниже, чтобы начать:",
+                            reply_markup=keyboard
+                        )
+                    else:
+                        logger.info(f"User {user_id} already registered")
+                        await message.answer("Вы уже зарегистрированы!")
             logger.info(f"Releasing lock for user {user_id}")
     except Exception as e:
         logger.error(f"Error in cmd_start: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@router.callback_query(F.data == "start_registration")
-async def start_registration_callback(callback: CallbackQuery):
+@router.message(F.text == "Начать регистрацию")
+async def start_registration(message: types.Message):
     try:
-        user_id = callback.from_user.id
+        user_id = message.from_user.id
         logger.info(f"Starting registration for user {user_id}")
         
         # Создаем клавиатуру для ввода имени
-        builder = InlineKeyboardBuilder()
-        builder.add(
-            InlineKeyboardButton(
-                text="Ввести имя",
-                callback_data="input_name"
-            )
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Ввести имя")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
-        builder.adjust(1)
         
-        await callback.message.edit_text(
+        await message.answer(
             "Первый шаг регистрации: введите ваше имя.\n"
             "Нажмите кнопку ниже, чтобы начать ввод:",
-            reply_markup=builder.as_markup()
+            reply_markup=keyboard
         )
-        await callback.answer("✅ Начинаем регистрацию!")
     except Exception as e:
-        logger.error(f"Error in start_registration_callback: {e}", exc_info=True)
-        await callback.answer("❌ Произошла ошибка. Пожалуйста, попробуйте позже.", show_alert=True)
+        logger.error(f"Error in start_registration: {e}", exc_info=True)
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@router.callback_query(F.data == "input_name")
-async def input_name_callback(callback: CallbackQuery):
+@router.message(F.text == "Ввести имя")
+async def input_name(message: types.Message):
     try:
-        await callback.answer()
-        user_id = callback.from_user.id
+        user_id = message.from_user.id
         registration_states[user_id] = {"step": 1, "data": {}}
-        await callback.message.edit_text("Введите ваше имя:")
+        await message.answer(
+            "Введите ваше имя:",
+            reply_markup=ReplyKeyboardRemove()
+        )
     except Exception as e:
-        logger.error(f"Error in input_name_callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+        logger.error(f"Error in input_name: {e}")
+        await message.answer("Произошла ошибка", show_alert=True)
 
 @router.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 1)
 async def process_name(message: types.Message):
@@ -214,39 +215,40 @@ async def process_name(message: types.Message):
         registration_states[user_id]["step"] = 2
         
         # Создаем клавиатуру для ввода цели
-        builder = InlineKeyboardBuilder()
-        builder.add(
-            InlineKeyboardButton(
-                text="Ввести цель",
-                callback_data="input_goal"
-            )
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Ввести цель")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
-        builder.adjust(1)
         
         await message.answer(
             f"Отлично, {name}! Теперь введите вашу цель.\n"
             "Например: 'Бегать каждый день' или 'Читать 30 минут'\n"
             "Нажмите кнопку ниже, чтобы начать ввод:",
-            reply_markup=builder.as_markup()
+            reply_markup=keyboard
         )
     except Exception as e:
         logger.error(f"Error in process_name: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@router.callback_query(F.data == "input_goal")
-async def input_goal_callback(callback: CallbackQuery):
+@router.message(F.text == "Ввести цель")
+async def input_goal(message: types.Message):
     try:
-        await callback.answer()
-        user_id = callback.from_user.id
+        user_id = message.from_user.id
         if user_id not in registration_states:
-            await callback.message.edit_text("Начните регистрацию заново с помощью команды /start")
+            await message.answer("Начните регистрацию заново с помощью команды /start")
             return
             
         registration_states[user_id]["step"] = 2
-        await callback.message.edit_text("Введите вашу цель:")
+        await message.answer(
+            "Введите вашу цель:",
+            reply_markup=ReplyKeyboardRemove()
+        )
     except Exception as e:
-        logger.error(f"Error in input_goal_callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+        logger.error(f"Error in input_goal: {e}")
+        await message.answer("Произошла ошибка", show_alert=True)
 
 @router.message(lambda message: message.from_user.id in registration_states and registration_states[message.from_user.id]["step"] == 2)
 async def process_goal(message: types.Message):
@@ -283,10 +285,14 @@ async def process_emoji(message: types.Message):
         registration_states[user_id]["data"]["emoji"] = emoji
         
         # Создаем клавиатуру для подтверждения
-        keyboard = InlineKeyboardBuilder()
-        keyboard.button(text="✅ Подтвердить", callback_data="confirm_registration")
-        keyboard.button(text="🔄 Начать заново", callback_data="restart_registration")
-        keyboard.adjust(1)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="✅ Подтвердить")],
+                [KeyboardButton(text="🔄 Начать заново")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
         
         # Получаем данные из состояния
         data = registration_states[user_id]["data"]
@@ -300,75 +306,78 @@ async def process_emoji(message: types.Message):
             f"🎯 Цель: {goal}\n"
             f"😊 Эмодзи: {emoji}\n\n"
             f"Если все верно, нажмите 'Подтвердить'. Если хотите начать заново, нажмите 'Начать заново'.",
-            reply_markup=keyboard.as_markup()
+            reply_markup=keyboard
         )
     except Exception as e:
         logger.error(f"Error in process_emoji: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@router.callback_query(F.data == "confirm_registration")
-async def confirm_registration_callback(callback: CallbackQuery):
+@router.message(F.text == "✅ Подтвердить")
+async def confirm_registration(message: types.Message):
     try:
-        await callback.answer()
-        user_id = callback.from_user.id
+        user_id = message.from_user.id
         
         if user_id not in registration_states:
-            await callback.message.edit_text("❌ Ошибка: сессия регистрации истекла. Пожалуйста, начните регистрацию заново.")
+            await message.answer("❌ Ошибка: сессия регистрации истекла. Пожалуйста, начните регистрацию заново.")
             return
             
         data = registration_states[user_id]["data"]
         
         async with async_session() as session:
-            # Проверяем, существует ли уже пользователь
-            existing_user = await session.get(User, user_id)
-            if existing_user:
-                # Обновляем существующего пользователя
-                existing_user.name = data["name"]
-                existing_user.goal = data["goal"]
-                existing_user.emoji = data["emoji"]
-                await session.commit()
-                await callback.message.edit_text("✅ Ваш профиль успешно обновлен!")
-            else:
-                # Создаем нового пользователя
-                new_user = User(
-                    id=user_id,
-                    name=data["name"],
-                    goal=data["goal"],
-                    emoji=data["emoji"]
-                )
-                session.add(new_user)
-                await session.commit()
-                await callback.message.edit_text("✅ Регистрация успешно завершена!")
-            
-            # Очищаем состояние регистрации
-            del registration_states[user_id]
-            
+            async with session.begin():
+                # Проверяем, существует ли уже пользователь
+                existing_user = await session.get(User, user_id)
+                if existing_user:
+                    # Обновляем существующего пользователя
+                    existing_user.name = data["name"]
+                    existing_user.goal = data["goal"]
+                    existing_user.emoji = data["emoji"]
+                    await session.commit()
+                    await message.answer("✅ Ваш профиль успешно обновлен!", reply_markup=ReplyKeyboardRemove())
+                else:
+                    # Создаем нового пользователя
+                    new_user = User(
+                        id=user_id,
+                        name=data["name"],
+                        goal=data["goal"],
+                        emoji=data["emoji"]
+                    )
+                    session.add(new_user)
+                    await session.commit()
+                    await message.answer("✅ Регистрация успешно завершена!", reply_markup=ReplyKeyboardRemove())
+                
+                # Очищаем состояние регистрации
+                del registration_states[user_id]
+                
     except Exception as e:
-        logger.error(f"Error in confirm_registration_callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+        logger.error(f"Error in confirm_registration: {e}")
+        await message.answer("Произошла ошибка", show_alert=True)
 
-@router.callback_query(F.data == "restart_registration")
-async def restart_registration_callback(callback: CallbackQuery):
+@router.message(F.text == "🔄 Начать заново")
+async def restart_registration(message: types.Message):
     try:
-        await callback.answer()
-        user_id = callback.from_user.id
+        user_id = message.from_user.id
         
         # Очищаем состояние регистрации
         if user_id in registration_states:
             del registration_states[user_id]
             
         # Создаем клавиатуру для начала регистрации
-        keyboard = InlineKeyboardBuilder()
-        keyboard.button(text="Начать регистрацию", callback_data="start_registration")
-        keyboard.adjust(1)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Начать регистрацию")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
         
-        await callback.message.edit_text(
+        await message.answer(
             "Регистрация сброшена. Нажмите кнопку ниже, чтобы начать заново.",
-            reply_markup=keyboard.as_markup()
+            reply_markup=keyboard
         )
     except Exception as e:
-        logger.error(f"Error in restart_registration_callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+        logger.error(f"Error in restart_registration: {e}")
+        await message.answer("Произошла ошибка", show_alert=True)
 
 # Обновление профиля
 @router.message(Command("update"), F.chat.type == ChatType.PRIVATE)
@@ -385,75 +394,69 @@ async def cmd_update(message: types.Message):
         logger.info(f"Received /update command from user {user_id}")
         
         async with async_session() as session:
-            user = await session.execute(
-                select(User)
-                .where(User.telegram_id == user_id)
-            )
-            user = user.scalar_one_or_none()
-            
-            if not user:
-                await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
-                return
-            
-            # Создаем клавиатуру с помощью InlineKeyboardBuilder
-            builder = InlineKeyboardBuilder()
-            builder.add(
-                InlineKeyboardButton(
-                    text="Изменить имя",
-                    callback_data="update_name"
-                ),
-                InlineKeyboardButton(
-                    text="Изменить цель",
-                    callback_data="update_goal"
-                ),
-                InlineKeyboardButton(
-                    text="Изменить эмодзи",
-                    callback_data="update_emoji"
+            async with session.begin():
+                user = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
                 )
-            )
-            
-            # Настраиваем клавиатуру (1 кнопка в ряд)
-            builder.adjust(1)
-            
-            await message.answer(
-                "Что вы хотите изменить?",
-                reply_markup=builder.as_markup()
-            )
+                user = user.scalar_one_or_none()
+                
+                if not user:
+                    await message.answer("Вы не зарегистрированы. Используйте команду /start для регистрации.")
+                    return
+                
+                # Создаем клавиатуру
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="Изменить имя")],
+                        [KeyboardButton(text="Изменить цель")],
+                        [KeyboardButton(text="Изменить эмодзи")]
+                    ],
+                    resize_keyboard=True,
+                    one_time_keyboard=True
+                )
+                
+                await message.answer(
+                    "Что вы хотите изменить?",
+                    reply_markup=keyboard
+                )
     except Exception as e:
         logger.error(f"Error in cmd_update: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@router.callback_query(F.data.startswith("update_"))
-async def update_field_callback(callback: CallbackQuery):
+@router.message(F.text.in_(["Изменить имя", "Изменить цель", "Изменить эмодзи"]))
+async def update_field(message: types.Message):
     try:
-        await callback.answer()
-        user_id = callback.from_user.id
-        field = callback.data.split("_")[1]
+        user_id = message.from_user.id
+        field = message.text.split()[1].lower()  # Получаем "имя", "цель" или "эмодзи"
         
         async with async_session() as session:
-            user = await session.get(User, user_id)
-            if not user:
-                await callback.message.edit_text("❌ Ошибка: пользователь не найден")
-                return
+            async with session.begin():
+                user = await session.get(User, user_id)
+                if not user:
+                    await message.answer("❌ Ошибка: пользователь не найден")
+                    return
+                    
+                update_states[user_id] = field
                 
-            update_states[user_id] = field
-            
-            if field == "emoji":
-                await callback.message.edit_text(
-                    "Отправьте любой эмодзи, который будет отображаться рядом с вашим именем в статистике.\n"
-                    "Например: 🏃, 📚, 💪, 🧘, 🎯 или любой другой эмодзи на ваш выбор"
-                )
-            else:
-                field_names = {
-                    "name": "имя",
-                    "goal": "цель"
-                }
-                await callback.message.edit_text(
-                    f"Введите новое {field_names[field]}:"
-                )
+                if field == "эмодзи":
+                    await message.answer(
+                        "Отправьте любой эмодзи, который будет отображаться рядом с вашим именем в статистике.\n"
+                        "Например: 🏃, 📚, 💪, 🧘, 🎯 или любой другой эмодзи на ваш выбор",
+                        reply_markup=ReplyKeyboardRemove()
+                    )
+                else:
+                    field_names = {
+                        "имя": "имя",
+                        "цель": "цель"
+                    }
+                    await message.answer(
+                        f"Введите новое {field_names[field]}:",
+                        reply_markup=ReplyKeyboardRemove()
+                    )
     except Exception as e:
-        logger.error(f"Error in update_field_callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+        logger.error(f"Error in update_field: {e}")
+        await message.answer("Произошла ошибка", show_alert=True)
 
 @router.message(lambda message: message.from_user.id in update_states)
 async def process_field_update(message: types.Message):
@@ -462,36 +465,37 @@ async def process_field_update(message: types.Message):
         field = update_states[user_id]
         value = message.text.strip()
         
-        if field == "emoji":
+        if field == "эмодзи":
             # Проверяем, что сообщение содержит только один эмодзи
             if len(value) != 1 or not any(char in value for char in ['\U0001F300-\U0001F9FF', '\U0001F1E0-\U0001F1FF']):
                 await message.answer("Пожалуйста, отправьте только один эмодзи. Попробуйте еще раз:")
                 return
-        elif field in ["name", "goal"]:
-            min_length = 2 if field == "name" else 5
+        elif field in ["имя", "цель"]:
+            min_length = 2 if field == "имя" else 5
             if len(value) < min_length:
-                await message.answer(f"{'Имя' if field == 'name' else 'Цель'} должна содержать минимум {min_length} символа. Попробуйте еще раз:")
+                await message.answer(f"{'Имя' if field == 'имя' else 'Цель'} должна содержать минимум {min_length} символа. Попробуйте еще раз:")
                 return
         
         async with async_session() as session:
-            user = await session.execute(
-                select(User)
-                .where(User.telegram_id == user_id)
-            )
-            user = user.scalar_one_or_none()
-            
-            if field == "name":
-                user.name = value
-            elif field == "goal":
-                user.goal = value
-            elif field == "emoji":
-                user.emoji = value
-            
-            await session.commit()
-            del update_states[user_id]
-            
-            await message.answer(f"✅ {field.capitalize()} успешно обновлено!")
-            await cmd_profile(message)
+            async with session.begin():
+                user = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
+                )
+                user = user.scalar_one_or_none()
+                
+                if field == "имя":
+                    user.name = value
+                elif field == "цель":
+                    user.goal = value
+                elif field == "эмодзи":
+                    user.emoji = value
+                
+                await session.commit()
+                del update_states[user_id]
+                
+                await message.answer(f"✅ {field.capitalize()} успешно обновлено!")
+                await cmd_profile(message)
     except Exception as e:
         logger.error(f"Error in process_field_update: {e}", exc_info=True)
         await message.answer("Произошла ошибка при обновлении данных. Пожалуйста, попробуйте позже.")
@@ -569,44 +573,40 @@ async def cmd_stop(message: types.Message):
         logger.info(f"Received /stop command from user {user_id}")
         
         async with async_session() as session:
-            user = await session.execute(
-                select(User)
-                .where(User.telegram_id == user_id)
-            )
-            user = user.scalar_one_or_none()
-            
-            if not user:
-                await message.answer("Вы не зарегистрированы.")
-                return
-            
-            # Создаем клавиатуру для подтверждения удаления
-            builder = InlineKeyboardBuilder()
-            builder.add(
-                InlineKeyboardButton(
-                    text="✅ Да, удалить",
-                    callback_data="confirm_stop"
-                ),
-                InlineKeyboardButton(
-                    text="❌ Отмена",
-                    callback_data="cancel_stop"
+            async with session.begin():
+                user = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
                 )
-            )
-            builder.adjust(2)  # 2 кнопки в ряд
-            
-            await message.answer(
-                "⚠️ Вы уверены, что хотите удалить свой профиль и все данные?\n"
-                "Это действие нельзя отменить!",
-                reply_markup=builder.as_markup()
-            )
+                user = user.scalar_one_or_none()
+                
+                if not user:
+                    await message.answer("Вы не зарегистрированы.")
+                    return
+                
+                # Создаем клавиатуру для подтверждения удаления
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="✅ Да, удалить")],
+                        [KeyboardButton(text="❌ Отмена")]
+                    ],
+                    resize_keyboard=True,
+                    one_time_keyboard=True
+                )
+                
+                await message.answer(
+                    "⚠️ Вы уверены, что хотите удалить свой профиль и все данные?\n"
+                    "Это действие нельзя отменить!",
+                    reply_markup=keyboard
+                )
     except Exception as e:
         logger.error(f"Error in cmd_stop: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
 
-@router.callback_query(F.data == "confirm_stop")
-async def confirm_stop_callback(callback: CallbackQuery):
+@router.message(F.text == "✅ Да, удалить")
+async def confirm_stop(message: types.Message):
     try:
-        await callback.answer()
-        user_id = callback.from_user.id
+        user_id = message.from_user.id
         
         async with async_session() as session:
             async with session.begin():
@@ -614,21 +614,29 @@ async def confirm_stop_callback(callback: CallbackQuery):
                 if user:
                     await session.delete(user)
                     await session.commit()
-                    await callback.message.edit_text("✅ Ваши данные успешно удалены")
+                    await message.answer(
+                        "✅ Ваши данные успешно удалены",
+                        reply_markup=ReplyKeyboardRemove()
+                    )
                 else:
-                    await callback.message.edit_text("❌ Ошибка: пользователь не найден")
+                    await message.answer(
+                        "❌ Ошибка: пользователь не найден",
+                        reply_markup=ReplyKeyboardRemove()
+                    )
     except Exception as e:
-        logger.error(f"Error in confirm_stop_callback: {e}")
-        await callback.answer("❌ Произошла ошибка при удалении данных", show_alert=True)
+        logger.error(f"Error in confirm_stop: {e}")
+        await message.answer("❌ Произошла ошибка при удалении данных", show_alert=True)
 
-@router.callback_query(F.data == "cancel_stop")
-async def cancel_stop_callback(callback: CallbackQuery):
+@router.message(F.text == "❌ Отмена")
+async def cancel_stop(message: types.Message):
     try:
-        await callback.answer()
-        await callback.message.edit_text("✅ Удаление данных отменено")
+        await message.answer(
+            "✅ Удаление данных отменено",
+            reply_markup=ReplyKeyboardRemove()
+        )
     except Exception as e:
-        logger.error(f"Error in cancel_stop_callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+        logger.error(f"Error in cancel_stop: {e}")
+        await message.answer("Произошла ошибка", show_alert=True)
 
 async def get_switch_pm_button(bot_username: str) -> InlineKeyboardMarkup:
     """Создает кнопку для перехода в личные сообщения"""
