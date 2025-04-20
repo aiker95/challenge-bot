@@ -70,6 +70,8 @@ class LoggingMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, types.Message):
             logger.info(f"Handling message from user {event.from_user.id}: {event.text}")
+        elif isinstance(event, types.CallbackQuery):
+            logger.info(f"Handling callback query from user {event.from_user.id}: {event.data}")
         return await handler(event, data)
 
 class CallbackLoggingMiddleware(BaseMiddleware):
@@ -90,6 +92,16 @@ class CallbackLoggingMiddleware(BaseMiddleware):
 dp.update.middleware(ThrottlingMiddleware())
 dp.update.middleware(LoggingMiddleware())
 dp.update.middleware(CallbackLoggingMiddleware())
+
+# Добавляем обработчик для всех callback-запросов
+@router.callback_query()
+async def handle_callback_query(callback: CallbackQuery):
+    try:
+        logger.info(f"Received callback query: {callback.data}")
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in handle_callback_query: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 @router.errors()
 async def error_handler(update: types.Update, exception: Exception):
@@ -980,7 +992,13 @@ async def cmd_complete(message: types.Message):
         logger.info(f"Received /complete command from user {user_id}")
         
         async with async_session() as session:
-            user = await session.get(User, user_id)
+            # Исправляем запрос для поиска пользователя по telegram_id
+            result = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = result.scalar_one_or_none()
+            
             if not user:
                 await message.answer("Вы не зарегистрированы. Используйте команду /start")
                 return
@@ -1005,39 +1023,52 @@ async def cmd_complete(message: types.Message):
 @router.callback_query(F.data.startswith("complete_"))
 async def complete_date_callback(callback: CallbackQuery):
     try:
+        logger.info(f"Processing complete_date_callback with data: {callback.data}")
         await callback.answer()
+        
         user_id = callback.from_user.id
         date_str = callback.data.split("_")[1]
         date = datetime.strptime(date_str, "%Y-%m-%d").date()
         
+        logger.info(f"User {user_id} trying to complete goal for date {date}")
+        
         async with async_session() as session:
-            # Проверяем существование пользователя
-            user = await session.get(User, user_id)
+            # Исправляем запрос для поиска пользователя по telegram_id
+            result = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+            )
+            user = result.scalar_one_or_none()
+            
             if not user:
+                logger.warning(f"User {user_id} not found")
                 await callback.message.edit_text("Вы не зарегистрированы. Используйте команду /start")
                 return
             
             # Проверяем, не существует ли уже выполнение на эту дату
-            existing_completion = await session.execute(
+            result = await session.execute(
                 select(Completion)
                 .where(
-                    Completion.user_id == user_id,
+                    Completion.user_id == user.id,
                     Completion.date == date
                 )
             )
-            existing_completion = existing_completion.scalar_one_or_none()
+            existing_completion = result.scalar_one_or_none()
             
             if existing_completion:
+                logger.info(f"User {user_id} already completed goal for {date}")
                 await callback.message.edit_text(f"Вы уже отметили выполнение на {date.strftime('%d.%m.%Y')}")
                 return
             
             # Создаем новое выполнение
             new_completion = Completion(
-                user_id=user_id,
+                user_id=user.id,
                 date=date
             )
             session.add(new_completion)
             await session.commit()
+            
+            logger.info(f"Created new completion for user {user_id} on {date}")
             
             # Обновляем сообщение с новыми кнопками
             keyboard = InlineKeyboardBuilder()
@@ -1054,7 +1085,7 @@ async def complete_date_callback(callback: CallbackQuery):
                 reply_markup=keyboard.as_markup()
             )
     except Exception as e:
-        logger.error(f"Error in complete_date_callback: {e}")
+        logger.error(f"Error in complete_date_callback: {e}", exc_info=True)
         await callback.answer("Произошла ошибка", show_alert=True)
 
 async def on_startup(bot: Bot) -> None:
