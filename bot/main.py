@@ -574,31 +574,25 @@ async def cmd_stop(message: types.Message):
         
         async with async_session() as session:
             async with session.begin():
-                user = await session.execute(
+                # Исправляем поиск пользователя по telegram_id
+                result = await session.execute(
                     select(User)
                     .where(User.telegram_id == user_id)
                 )
-                user = user.scalar_one_or_none()
+                user = result.scalar_one_or_none()
                 
-                if not user:
-                    await message.answer("Вы не зарегистрированы.")
-                    return
-                
-                # Создаем клавиатуру для подтверждения удаления
-                keyboard = ReplyKeyboardMarkup(
-                    keyboard=[
-                        [KeyboardButton(text="✅ Да, удалить")],
-                        [KeyboardButton(text="❌ Отмена")]
-                    ],
-                    resize_keyboard=True,
-                    one_time_keyboard=True
-                )
-                
-                await message.answer(
-                    "⚠️ Вы уверены, что хотите удалить свой профиль и все данные?\n"
-                    "Это действие нельзя отменить!",
-                    reply_markup=keyboard
-                )
+                if user:
+                    await session.delete(user)
+                    await session.commit()
+                    await message.answer(
+                        "✅ Ваши данные успешно удалены",
+                        reply_markup=ReplyKeyboardRemove()
+                    )
+                else:
+                    await message.answer(
+                        "❌ Ошибка: пользователь не найден",
+                        reply_markup=ReplyKeyboardRemove()
+                    )
     except Exception as e:
         logger.error(f"Error in cmd_stop: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -610,7 +604,13 @@ async def confirm_stop(message: types.Message):
         
         async with async_session() as session:
             async with session.begin():
-                user = await session.get(User, user_id)
+                # Исправляем поиск пользователя по telegram_id
+                result = await session.execute(
+                    select(User)
+                    .where(User.telegram_id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                
                 if user:
                     await session.delete(user)
                     await session.commit()
