@@ -113,9 +113,6 @@ registration_states = {}
 registration_locks = {}
 update_states = {}
 
-# Добавляем глобальную переменную для хранения времени последней активности
-last_activity_time = datetime.now()
-
 # Добавляем глобальную переменную для поддержания активности
 keep_alive_counter = 0
 
