@@ -937,7 +937,57 @@ async def process_result_type(message: types.Message):
         logger.error(f"Error in process_result_type: {e}", exc_info=True)
         await message.answer("Произошла ошибка при получении результатов.")
 
-@router.message(Command("help"))
+@router.message(Command("participants"))
+async def cmd_participants(message: types.Message):
+    try:
+        async with async_session() as session:
+            async with session.begin():
+                # Получаем всех пользователей
+                result = await session.execute(select(User))
+                users = result.scalars().all()
+                
+                if not users:
+                    await message.answer("Пока нет зарегистрированных участников.")
+                    return
+                
+                # Формируем сообщение
+                participants_message = "👥 Участники Зарубы:\n\n"
+                
+                for user in users:
+                    # Получаем статистику выполнения для каждого пользователя
+                    completions = await session.execute(
+                        select(Completion)
+                        .where(Completion.user_id == user.id)
+                        .order_by(Completion.date)
+                    )
+                    completions = completions.scalars().all()
+                    
+                    # Получаем первую и последнюю дату выполнения
+                    dates = await session.execute(
+                        select(Completion.date)
+                        .order_by(Completion.date)
+                    )
+                    dates = dates.scalars().all()
+                    
+                    total_days = 0
+                    if dates:
+                        first_date = dates[0]
+                        last_date = dates[-1]
+                        total_days = (last_date - first_date).days + 1
+                    
+                    participants_message += (
+                        f"👤 {user.emoji} {user.name}\n"
+                        f"🎯 Цель: {user.goal}\n"
+                        f"✅ Выполнено: {len(completions)}/{total_days if total_days > 0 else '?'}\n"
+                        f"📅 С: {user.created_at.strftime('%d.%m.%Y')}\n\n"
+                    )
+                
+                await message.answer(participants_message)
+    except Exception as e:
+        logger.error(f"Error in cmd_participants: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении списка участников.")
+
+@router.message(Command("help"), F.chat.type == ChatType.PRIVATE)
 async def cmd_help(message: types.Message):
     help_text = """
 🤖 Доступные команды:
@@ -947,10 +997,12 @@ async def cmd_help(message: types.Message):
 /profile - Показать свой профиль
 /update - Обновить данные профиля
 /stop - Удалить свои данные
+/participants - Показать всех участников
 
 👥 В любом чате:
 /complete - Отметить выполнение цели
 /result - Показать результаты (требуется регистрация)
+/participants - Показать всех участников
 
 ❓ Дополнительно (доступно всем):
 /help - Показать эту справку
@@ -977,6 +1029,7 @@ async def cmd_info(message: types.Message):
 • /update - Изменить данные профиля (только в личных сообщениях)
 • /stop - Удалить свой профиль и все данные (только в личных сообщениях)
 • /result - Показать результаты с выбором типа отчета
+• /participants - Показать всех участников и их прогресс
 
 3️⃣ Просмотр результатов:
 • /result - Показать результаты с выбором типа отчета:
@@ -985,9 +1038,10 @@ async def cmd_info(message: types.Message):
   - Месяц: результаты за текущий месяц
   - Год: результаты за текущий год
   - По шагам: детальная статистика по дням
+• /participants - Показать всех участников и их прогресс
 
 4️⃣ Дополнительно (доступно всем):
-• /help - Краткая справка по командам
+• /help - Краткая справка по командам (только в личных сообщениях)
 • /info - Показать эту инструкцию
 
 📝 Правила использования:
@@ -1110,6 +1164,7 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="profile", description="Показать свой профиль"),
         BotCommand(command="update", description="Обновить данные профиля"),
         BotCommand(command="stop", description="Удалить свои данные"),
+        BotCommand(command="participants", description="Показать всех участников"),
         BotCommand(command="help", description="Показать справку"),
         BotCommand(command="info", description="Подробная инструкция")
     ]
