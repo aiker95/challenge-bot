@@ -29,6 +29,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Версия бота и информация о последнем обновлении
+BOT_VERSION = "1.0.10"
+LAST_UPDATE = "24.04.2025"
+UPDATE_INFO = """
+🔄 Последнее обновление (v1.0.10):
+• Устранён баг перезапуска сервиса
+• Добавлена команда /participants для просмотра всех участников
+• Улучшена обработка перезапусков сервиса
+• Оптимизирована работа с базой данных
+"""
+
 # Определение middleware классов
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, limit=1):
@@ -1166,7 +1177,8 @@ async def on_startup(bot: Bot) -> None:
         BotCommand(command="stop", description="Удалить свои данные"),
         BotCommand(command="participants", description="Показать всех участников"),
         BotCommand(command="help", description="Показать справку"),
-        BotCommand(command="info", description="Подробная инструкция")
+        BotCommand(command="info", description="Подробная инструкция"),
+        BotCommand(command="version", description="Информация о версии")
     ]
     
     try:
@@ -1175,7 +1187,7 @@ async def on_startup(bot: Bot) -> None:
     except Exception as e:
         logger.error(f"Error registering bot commands: {e}", exc_info=True)
 
-    # Отправляем уведомление о перезапуске
+    # Отправляем уведомление о версии и обновлении
     try:
         async with async_session() as session:
             async with session.begin():
@@ -1187,14 +1199,25 @@ async def on_startup(bot: Bot) -> None:
                     try:
                         await bot.send_message(
                             user.telegram_id,
-                            "🔄 Бот перезапущен и готов к работе!\n"
-                            "Если у вас возникли проблемы с выполнением команд, "
-                            "пожалуйста, попробуйте повторить запрос."
+                            f"🤖 Бот обновлен до версии {BOT_VERSION}\n\n"
+                            f"{UPDATE_INFO}\n"
+                            f"📅 Дата обновления: {LAST_UPDATE}"
                         )
                     except Exception as e:
-                        logger.error(f"Error sending restart notification to user {user.telegram_id}: {e}")
+                        logger.error(f"Error sending version notification to user {user.telegram_id}: {e}")
     except Exception as e:
-        logger.error(f"Error sending restart notifications: {e}")
+        logger.error(f"Error sending version notifications: {e}")
+
+@router.message(Command("version"))
+async def cmd_version(message: types.Message):
+    """Показывает информацию о версии бота"""
+    version_message = (
+        f"🤖 Информация о версии:\n\n"
+        f"Версия: {BOT_VERSION}\n"
+        f"Дата последнего обновления: {LAST_UPDATE}\n\n"
+        f"{UPDATE_INFO}"
+    )
+    await message.answer(version_message)
 
 async def handle_root(request):
     logger.info("Root endpoint accessed")
