@@ -113,6 +113,12 @@ registration_states = {}
 registration_locks = {}
 update_states = {}
 
+# Добавляем глобальную переменную для хранения времени последней активности
+last_activity_time = datetime.now()
+
+# Добавляем глобальную переменную для поддержания активности
+keep_alive_counter = 0
+
 # Обработчики ошибок
 @router.errors()
 async def error_handler(update: types.Update, exception: Exception):
@@ -1145,6 +1151,23 @@ async def handle_root(request):
         content_type="text/plain"
     )
 
+async def keep_alive_task():
+    """Фоновая задача для поддержания активности сервиса"""
+    global keep_alive_counter
+    while True:
+        try:
+            # Простые операции для поддержания активности
+            keep_alive_counter += 1
+            keep_alive_counter -= 1
+            
+            logger.debug(f"Keep-alive task is running")
+            
+            # Ждем 1 секунду перед следующей итерацией
+            await asyncio.sleep(5)
+        except Exception as e:
+            logger.error(f"Error in keep-alive task: {e}")
+            await asyncio.sleep(1)
+
 async def main():
     logger.info("Starting application...")
     # Логируем переменные окружения
@@ -1196,6 +1219,10 @@ async def main():
             drop_pending_updates=True
         )
         logger.info("Webhook set successfully")
+    
+    # Запускаем фоновую задачу
+    asyncio.create_task(keep_alive_task())
+    logger.info("Keep-alive task started")
     
     # Запускаем сервер
     await web._run_app(app, port=port)
