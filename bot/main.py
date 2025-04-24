@@ -1235,13 +1235,18 @@ async def keep_alive_task():
             keep_alive_counter += 1
             keep_alive_counter -= 1
             
+            # Выполняем простой запрос к базе данных
+            async with async_session() as session:
+                async with session.begin():
+                    await session.execute(text("SELECT 1"))
+            
             logger.debug(f"Keep-alive task is running")
             
-            # Ждем 1 секунду перед следующей итерацией
+            # Ждем 5 секунд перед следующей итерацией
             await asyncio.sleep(5)
         except Exception as e:
             logger.error(f"Error in keep-alive task: {e}")
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
 
 async def main():
     logger.info("Starting application...")
