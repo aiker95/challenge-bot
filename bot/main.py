@@ -30,12 +30,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Версия бота и информация о последнем обновлении
-BOT_VERSION = "1.0.11"
+BOT_VERSION = "1.0.14"
 LAST_UPDATE = "24.04.2025"
 UPDATE_INFO = """
-🔄 Последнее обновление (v1.0.11):
+🔄 Последнее обновление (v1.0.14):
+• Обновлена команда /help для просмотра справки
 • Добавлена команда /participants для просмотра всех участников
-• Попытка полностью исключить перезапуски сервиса
 """
 
 # Определение middleware классов
@@ -1233,6 +1233,12 @@ async def keep_alive_task():
             keep_alive_counter += 1
             keep_alive_counter -= 1
             
+            # Пинг к Telegram API
+            try:
+                await bot.get_me()
+            except Exception as e:
+                logger.error(f"Telegram API ping failed: {str(e)}")
+            
             # Выполняем полезный запрос к базе данных
             async with async_session() as session:
                 async with session.begin():
@@ -1254,11 +1260,11 @@ async def keep_alive_task():
                             f"активных - {stats.active_users}"
                         )
             
-            # Ждем 30 секунд перед следующей итерацией
-            await asyncio.sleep(30)
+            # Ждем 10 секунд перед следующей итерацией
+            await asyncio.sleep(10)
         except Exception as e:
             logger.error(f"Error in keep-alive task: {str(e)}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(10)
 
 async def main():
     logger.info("Starting application...")
