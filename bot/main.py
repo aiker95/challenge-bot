@@ -1235,18 +1235,32 @@ async def keep_alive_task():
             keep_alive_counter += 1
             keep_alive_counter -= 1
             
-            # Выполняем простой запрос к базе данных
+            # Выполняем полезный запрос к базе данных
             async with async_session() as session:
                 async with session.begin():
-                    await session.execute(text("SELECT 1"))
+                    # Получаем статистику по пользователям
+                    result = await session.execute(
+                        select(
+                            text("COUNT(*) as total_users"),
+                            text("COUNT(CASE WHEN created_at >= CURRENT_DATE - INTERVAL '7 days' THEN 1 END) as new_users"),
+                            text("COUNT(DISTINCT c.user_id) as active_users")
+                        ).select_from(User)
+                        .outerjoin(Completion, User.id == Completion.user_id)
+                    )
+                    stats = result.first()
+                    
+                    if stats:
+                        logger.info(
+                            f"Системная статистика: всего пользователей - {stats.total_users}, "
+                            f"новых за неделю - {stats.new_users}, "
+                            f"активных - {stats.active_users}"
+                        )
             
-            logger.debug(f"Keep-alive task is running")
-            
-            # Ждем 5 секунд перед следующей итерацией
-            await asyncio.sleep(5)
+            # Ждем 30 секунд перед следующей итерацией
+            await asyncio.sleep(30)
         except Exception as e:
             logger.error(f"Error in keep-alive task: {e}")
-            await asyncio.sleep(5)
+            await asyncio.sleep(30)
 
 async def main():
     logger.info("Starting application...")
