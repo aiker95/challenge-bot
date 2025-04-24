@@ -30,14 +30,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Версия бота и информация о последнем обновлении
-BOT_VERSION = "1.0.10"
+BOT_VERSION = "1.0.11"
 LAST_UPDATE = "24.04.2025"
 UPDATE_INFO = """
-🔄 Последнее обновление (v1.0.10):
-• Устранён баг перезапуска сервиса
+🔄 Последнее обновление (v1.0.11):
 • Добавлена команда /participants для просмотра всех участников
-• Улучшена обработка перезапусков сервиса
-• Оптимизирована работа с базой данных
+• Попытка полностью исключить перезапуски сервиса
 """
 
 # Определение middleware классов
@@ -1243,7 +1241,7 @@ async def keep_alive_task():
                         select(
                             text("COUNT(*) as total_users"),
                             text("COUNT(CASE WHEN created_at >= CURRENT_DATE - INTERVAL '7 days' THEN 1 END) as new_users"),
-                            text("COUNT(DISTINCT c.user_id) as active_users")
+                            text("COUNT(DISTINCT completions.user_id) as active_users")
                         ).select_from(User)
                         .outerjoin(Completion, User.id == Completion.user_id)
                     )
