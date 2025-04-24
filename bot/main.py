@@ -11,7 +11,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func, case, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.callback_answer import CallbackAnswerMiddleware, CallbackAnswer
@@ -1239,9 +1239,9 @@ async def keep_alive_task():
                     # Получаем статистику по пользователям
                     result = await session.execute(
                         select(
-                            text("COUNT(*) as total_users"),
-                            text("COUNT(CASE WHEN created_at >= CURRENT_DATE - INTERVAL '7 days' THEN 1 END) as new_users"),
-                            text("COUNT(DISTINCT completions.user_id) as active_users")
+                            func.count().label('total_users'),
+                            func.count(case((User.created_at >= datetime.now() - timedelta(days=7), 1))).label('new_users'),
+                            func.count(distinct(Completion.user_id)).label('active_users')
                         ).select_from(User)
                         .outerjoin(Completion, User.id == Completion.user_id)
                     )
@@ -1257,7 +1257,7 @@ async def keep_alive_task():
             # Ждем 30 секунд перед следующей итерацией
             await asyncio.sleep(30)
         except Exception as e:
-            logger.error(f"Error in keep-alive task: {e}")
+            logger.error(f"Error in keep-alive task: {str(e)}")
             await asyncio.sleep(30)
 
 async def main():
