@@ -47,6 +47,8 @@ class ThrottlingMiddleware(BaseMiddleware):
         self.retry_count = {}
         super().__init__()
 
+
+
     async def __call__(self, handler, event, data):
         if not isinstance(event, types.Message):
             return await handler(event, data)
