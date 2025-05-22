@@ -37,9 +37,6 @@ logs/
 *.db
 *.sqlite3
 
-# Alembic
-alembic/versions/*
-
 # OS
 .DS_Store
 Thumbs.db 
