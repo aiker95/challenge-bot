@@ -22,17 +22,12 @@ wheels/
 
 # Virtual Environment
 venv/
-ENV/
-env/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Environment variables
-.env
 
 # Logs
 *.log
